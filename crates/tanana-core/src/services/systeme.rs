@@ -28,7 +28,15 @@ pub(crate) fn lire_parametres(conn: &rusqlite::Connection) -> Resultat<Parametre
 impl Tanana {
     /// Lisible par tout utilisateur connecté (devise et nom pour l'affichage).
     pub fn parametres(&mut self, token: &str) -> Resultat<Parametres> {
-        self.executer(token, None, |tx, _| lire_parametres(tx))
+        let copie = self.copie;
+        self.executer(token, None, |tx, _| {
+            let mut p = lire_parametres(tx)?;
+            // En consultation à distance, l'écran doit suivre le délai de la copie, pas celui de la réception.
+            if copie {
+                p.delai_inactivite_minutes = crate::distance::DELAI_COPIE_MINUTES as u32;
+            }
+            Ok(p)
+        })
     }
 
     /// Nom de l'hôtel pour l'écran de connexion (aucune session requise).

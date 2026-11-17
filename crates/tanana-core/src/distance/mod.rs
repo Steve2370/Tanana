@@ -41,6 +41,8 @@ use relais::Relais;
 /// Limites d'un lot : assez petit pour une connexion mobile instable.
 const LOT_OCTETS_MAX: usize = 256 * 1024;
 const LOT_CHANGEMENTS_MAX: i64 = 2_000;
+/// Inactivité tolérée en consultation à distance (lecture seule, ordinateur du propriétaire).
+pub const DELAI_COPIE_MINUTES: i64 = 240;
 
 // ───────────────────────────── Types ─────────────────────────────
 
@@ -711,18 +713,11 @@ impl Tanana {
         SessionOuverte { token, utilisateur: utilisateur_distant(), permissions }
     }
 
-    /// Délai d'inactivité de l'hôtel (paramètre copié), 15 minutes à défaut.
+    /// Délai d'inactivité de la consultation à distance. Celui de la réception
+    /// (souvent 15 minutes, poste partagé) ne convient pas au propriétaire, seul
+    /// devant son propre ordinateur et en lecture seule.
     fn delai_copie(&self) -> chrono::Duration {
-        let minutes: i64 = self
-            .conn
-            .query_row("SELECT valeur FROM parametres WHERE cle = 'delai_inactivite_minutes'", [], |r| {
-                r.get::<_, String>(0)
-            })
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(15)
-            .clamp(1, 240);
-        chrono::Duration::minutes(minutes)
+        chrono::Duration::minutes(DELAI_COPIE_MINUTES)
     }
 
     pub(crate) fn verifier_session_copie(&mut self, token: &str, maintenant: DateTime<Utc>) -> Resultat<()> {

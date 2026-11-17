@@ -436,8 +436,11 @@ fn la_copie_est_protegee_par_son_mot_de_passe() {
     assert_eq!(copie.ma_session(&session.token).unwrap().token, session.token);
     assert!(copie.obtenir_reservation(&session.token, &r.id).is_ok());
 
-    // Inactivité : la session expire
-    temps.avancer(Duration::minutes(16));
+    // Inactivité : le propriétaire a 4 heures (la réception de l'hôtel, elle, garde ses 15 minutes)
+    assert_eq!(copie.parametres(&session.token).unwrap().delai_inactivite_minutes, 240);
+    temps.avancer(Duration::minutes(239));
+    assert!(copie.obtenir_reservation(&session.token, &r.id).is_ok(), "encore actif après 3 h 59");
+    temps.avancer(Duration::minutes(241));
     assert!(matches!(copie.obtenir_reservation(&session.token, &r.id), Err(Erreur::SessionExpiree)));
     assert!(matches!(copie.ma_session(&session.token), Err(Erreur::NonAuthentifie)));
 
