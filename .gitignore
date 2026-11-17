@@ -16,3 +16,6 @@ Thumbs.db
 # Résultats de la QA (mutants, journaux)
 .qa/
 mutants.out*/
+
+# Codes d'invitation du relais (jamais sur GitHub)
+crates/tanana-relais/deploiement/vps-partage/.env

@@ -1,0 +1,30 @@
+# Relais Tanana sur un VPS où un autre projet tient déjà les ports 80/443
+# avec son propre Caddy (ici : Kadran). Le relais n'ouvre aucun port public :
+# il rejoint le réseau Docker de ce Caddy, qui lui transmet les visiteurs de
+# relais.<domaine> (voir relais.caddy et README.md dans ce dossier).
+#
+#   cp reglages.exemple .env && nano .env      # une seule fois
+#   docker compose up -d --build           # installer ou mettre à jour
+name: tanana
+services:
+  relais:
+    build:
+      context: ../../../..
+      dockerfile: crates/tanana-relais/Dockerfile
+    container_name: tanana-relais
+    restart: unless-stopped
+    environment:
+      TANANA_RELAIS_CODES: ${TANANA_RELAIS_CODES:?indiquez les codes d'invitation dans .env}
+      TANANA_RELAIS_HOTELS_MAX: ${TANANA_RELAIS_HOTELS_MAX:-500}
+    volumes:
+      - donnees:/donnees
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: ${RESEAU_PROXY:-kadran_internal}
+
+volumes:
+  donnees:

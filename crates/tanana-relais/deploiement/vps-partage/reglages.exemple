@@ -1,0 +1,11 @@
+# Copier en .env (jamais envoyé sur GitHub) puis remplir.
+
+# Codes d'invitation donnés aux hôtels, au moins 8 caractères, séparés par des virgules.
+# En créer un : openssl rand -hex 6
+TANANA_RELAIS_CODES=
+
+# Nombre maximal d'hôtels inscrits
+TANANA_RELAIS_HOTELS_MAX=500
+
+# Réseau Docker du Caddy qui tient les ports 80/443
+RESEAU_PROXY=kadran_internal

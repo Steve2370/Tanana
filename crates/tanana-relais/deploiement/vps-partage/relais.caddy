@@ -1,0 +1,6 @@
+# Site du relais Tanana, lu par le Caddy qui tient les ports 80/443.
+# Remplacer relais.exemple.com par le vrai nom (enregistrement DNS A vers le VPS).
+relais.exemple.com {
+	encode gzip
+	reverse_proxy tanana-relais:8080
+}
