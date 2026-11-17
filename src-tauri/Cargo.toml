@@ -1,0 +1,44 @@
+[package]
+name = "tanana"
+description = "Tanana — gestion d'hôtel hors ligne"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# Nom distinct du binaire (contrainte Windows de Tauri)
+name = "tanana_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tanana-core = { path = "../crates/tanana-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+log = "0.4"
+ts-rs = { version = "12", features = ["chrono-impl", "serde-json-impl"] }
+tauri-plugin-opener = "2"
+# Mise à jour automatique (activée seulement dans les versions publiées, voir README)
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
+# Trousseau du système pour la clé de chiffrement de la base.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["linux-native"] }
+
+[dev-dependencies]
+tempfile = "3"
+# Tests du circuit complet hôtel → vrai relais HTTP → poste du propriétaire
+tanana-relais = { path = "../crates/tanana-relais" }
+tokio = { version = "1", features = ["rt-multi-thread", "net"] }
+axum = "0.8"

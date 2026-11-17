@@ -1,0 +1,18 @@
+# Dépendances et compilations
+node_modules/
+dist/
+target/
+src-tauri/gen/
+
+# Système
+.DS_Store
+Thumbs.db
+
+# Bases de données locales de test
+*.db
+*.db-wal
+*.db-shm
+
+# Résultats de la QA (mutants, journaux)
+.qa/
+mutants.out*/

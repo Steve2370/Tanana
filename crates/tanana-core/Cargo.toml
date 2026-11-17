@@ -1,0 +1,38 @@
+[package]
+name = "tanana-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2 = "0.5"
+getrandom = "0.3"
+hex = "0.4"
+rusqlite = { version = "0.41", features = ["backup", "chrono"] }
+rusqlite_migration = "2"
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+uuid = { version = "1.29", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+ts-rs = { version = "12", features = ["chrono-impl", "serde-json-impl", "uuid-impl"] }
+krilla = "0.8"
+rustybuzz = "0.20"
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+flate2 = "1"
+data-encoding = "2"
+ureq = { version = "3", features = ["json"] }
+tanana-protocole = { version = "0.1.0", path = "../tanana-protocole" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Par défaut, la base est chiffrée avec SQLCipher (OpenSSL compilé avec l'app,
+# rien à installer sur le poste du client).
+default = ["chiffrement"]
+chiffrement = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
+# Pour du débogage seulement : SQLite standard, base lisible en clair.
+sans-chiffrement = ["rusqlite/bundled"]

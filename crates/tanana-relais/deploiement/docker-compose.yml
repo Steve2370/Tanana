@@ -1,0 +1,32 @@
+# Relais + Caddy (HTTPS automatique avec Let's Encrypt).
+# 1. Pointer le nom de domaine (ex. relais.mondomaine.com) vers l'adresse IP du VPS.
+# 2. Remplacer relais.mondomaine.com dans le Caddyfile.
+# 3. Choisir des codes d'invitation (au moins 8 caractères) ci-dessous.
+# 4. docker compose up -d
+services:
+  relais:
+    build:
+      context: ../../..
+      dockerfile: crates/tanana-relais/Dockerfile
+    restart: unless-stopped
+    environment:
+      TANANA_RELAIS_CODES: "CHANGER-CE-CODE-1,CHANGER-CE-CODE-2"
+      TANANA_RELAIS_HOTELS_MAX: "500"
+    volumes:
+      - donnees:/donnees
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    depends_on:
+      - relais
+
+volumes:
+  donnees:
+  caddy:

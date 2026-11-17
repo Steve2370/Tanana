@@ -1,0 +1,105 @@
+/* Police embarquée dans l'app (aucun accès internet nécessaire).
+   Lexend a été conçue pour faciliter la lecture (lettres larges et bien
+   espacées) ; ses formes arrondies rappellent celles du logo. */
+@import "@fontsource-variable/lexend/wght.css";
+@import "tailwindcss";
+
+/* Couleurs du logo. Les contrastes texte/fond respectent WCAG AA, et AAA
+   pour le texte courant (vérifié : encre 14,5:1, gris 8,1:1, teal 7,6:1). */
+@theme {
+  --font-sans: "Lexend Variable", ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  --color-papier: #fbf8f2;
+  --color-sable: #f2ede3;
+  --color-encre: #1b2727;
+  --color-gris: #3e4f4e;
+  --color-trait: #ddd5c6;
+  --color-bordure-champ: #748482;
+
+  /* Logo */
+  --color-marque: #09595a;
+  --color-marque-fonce: #063f40;
+  --color-marque-clair: #e2efee;
+  --color-orange: #de7922;
+  --color-orange-texte: #9a4a0b;
+  --color-orange-clair: #fbeadb;
+  --color-or: #f2a328;
+  --color-or-clair: #fdf1dc;
+
+  --color-succes: #1e6b3e;
+  --color-succes-clair: #e3f2e8;
+  --color-alerte: #7a4a06;
+  --color-danger: #a4281f;
+  --color-danger-clair: #fbe7e5;
+}
+
+/* Texte de base à 18 px (au lieu de 16) : toute l'interface grandit avec. */
+html {
+  font-size: 112.5%;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-papier text-encre font-sans antialiased;
+  line-height: 1.5;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+.selectionnable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Contour de focus bien visible pour la navigation au clavier */
+:focus-visible {
+  outline: 3px solid var(--color-or);
+  outline-offset: 2px;
+}
+
+/* Apparition douce des écrans ; désactivée si l'utilisateur réduit les animations */
+@keyframes apparition {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.apparition {
+  animation: apparition 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Listes déroulantes : même aspect sur Mac et Windows, avec une flèche bien visible */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: white;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2309595a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1.25rem;
+  padding-right: 2.75rem;
+  cursor: pointer;
+}

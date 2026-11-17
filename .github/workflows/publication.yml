@@ -1,0 +1,132 @@
+name: Publication
+
+# Pousser un tag « v0.2.0 » construit les installeurs Windows et macOS et les
+# attache à une release GitHub en BROUILLON. Les hôtels ne reçoivent la mise à
+# jour qu'une fois la release publiée (bouton « Publish release ») : on peut
+# donc essayer les installeurs avant.
+#
+# Tout est optionnel : sans secrets, les installeurs sont construits sans
+# signature et sans mise à jour automatique. Secrets et variables à créer
+# dans Settings › Secrets and variables › Actions (détails dans le README) :
+#
+#   Variables : TAURI_UPDATER_PUBKEY (clé publique de mise à jour)
+#               TANANA_RELAIS (adresse du serveur de consultation à distance)
+#   Secrets   : TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#               APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#               APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+#               WINDOWS_CERTIFICATE, WINDOWS_CERTIFICATE_PASSWORD
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publier:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - plateforme: macos-latest
+            args: --target universal-apple-darwin # Intel + Apple Silicon
+          - plateforme: windows-latest
+            args: ""
+    runs-on: ${{ matrix.plateforme }}
+    env:
+      # Adresse du serveur proposée par défaut dans l'application
+      VITE_TANANA_RELAIS: ${{ vars.TANANA_RELAIS }}
+      # Mise à jour automatique
+      TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TANANA_MISE_A_JOUR_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+      # Certificats : noms différents de ceux que lit Tauri, recopiés seulement s'ils existent
+      SECRET_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      SECRET_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.plateforme == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Signature macOS (si le certificat Apple est fourni)
+        if: runner.os == 'macOS' && env.SECRET_APPLE_CERTIFICATE != ''
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for nom in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            valeur="${!nom}"
+            if [ -n "$valeur" ]; then
+              { echo "$nom<<FIN_DE_VALEUR"; echo "$valeur"; echo "FIN_DE_VALEUR"; } >> "$GITHUB_ENV"
+            fi
+          done
+          echo "Signature et notarisation Apple activées."
+
+      - name: Signature Windows (si le certificat est fourni)
+        if: runner.os == 'Windows' && env.SECRET_WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $octets = [Convert]::FromBase64String($env:SECRET_WINDOWS_CERTIFICATE)
+          [IO.File]::WriteAllBytes("certificat.pfx", $octets)
+          $motDePasse = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificat = Import-PfxCertificate -FilePath certificat.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $motDePasse
+          Remove-Item certificat.pfx
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificat.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "Signature Windows activée."
+
+      - name: Nouveautés de la version (fichier NOUVEAUTES.md)
+        id: nouveautes
+        shell: bash
+        run: |
+          { echo "texte<<FIN_DE_TEXTE"; cat NOUVEAUTES.md 2>/dev/null || echo "Améliorations et corrections."; echo; echo "FIN_DE_TEXTE"; } >> "$GITHUB_OUTPUT"
+
+      - name: Réglages de la publication
+        shell: bash
+        run: node scripts/config-publication.mjs src-tauri/tauri.publication.conf.json
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Tanana ${{ github.ref_name }}
+          # Affiché dans Tanana au moment de proposer la mise à jour
+          releaseBody: ${{ steps.nouveautes.outputs.texte }}
+          releaseDraft: true
+          includeUpdaterJson: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.publication.conf.json
+
+      # Tauri fait certifier l'application, mais pas l'emballage .dmg autour :
+      # sans cette étape, macOS refuse le .dmg téléchargé (« Unnotarized Developer ID »).
+      - name: Certification Apple de l'installeur .dmg
+        if: runner.os == 'macOS' && env.SECRET_APPLE_CERTIFICATE != '' && env.APPLE_ID != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          dmg=$(ls target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$dmg"
+          spctl -a -vvv -t install "$dmg"
+          # Remplacer le .dmg déposé par tauri-action par la version certifiée
+          for nom in $(gh release view "$VERSION" --json assets -q '.assets[].name' | grep '\.dmg$' || true); do
+            gh release delete-asset "$VERSION" "$nom" -y
+          done
+          gh release upload "$VERSION" "$dmg"
+          echo "Installeur .dmg certifié par Apple : $(basename "$dmg")"

@@ -1,0 +1,30 @@
+[package]
+name = "tanana-relais"
+description = "Relais de consultation à distance de Tanana : garde des paquets chiffrés qu'il ne peut pas lire"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tanana-relais"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+chrono = "0.4"
+data-encoding = "2"
+getrandom = "0.3"
+hex = "0.4"
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tanana-protocole = { path = "../tanana-protocole" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower-http = { version = "0.6", features = ["limit", "trace"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+
+[dev-dependencies]
+tanana-core = { path = "../tanana-core" }
+tempfile = "3.27.0"

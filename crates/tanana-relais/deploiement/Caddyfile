@@ -1,0 +1,4 @@
+relais.mondomaine.com {
+	encode gzip
+	reverse_proxy relais:8080
+}

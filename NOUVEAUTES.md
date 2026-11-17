@@ -1,0 +1,3 @@
+- Remettre une copie de sécurité (Réglages, ou au premier lancement sur un nouvel ordinateur).
+- Mises à jour proposées automatiquement aux administrateurs.
+- Consultation à distance de l'hôtel par le propriétaire.

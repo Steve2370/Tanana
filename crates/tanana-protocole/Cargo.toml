@@ -1,0 +1,9 @@
+[package]
+name = "tanana-protocole"
+description = "Messages échangés entre Tanana et le relais de consultation à distance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
