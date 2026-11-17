@@ -1,0 +1,5 @@
+/* Même apparence que l'application. La page est construite à part
+   (racine src/web) : on indique à Tailwind où sont les composants partagés. */
+@import "../styles.css";
+@source "../components";
+@source "../lib";

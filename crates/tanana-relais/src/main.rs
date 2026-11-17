@@ -6,7 +6,9 @@
 //! - `TANANA_RELAIS_BASE` : fichier de données (défaut `relais.db`) ;
 //! - `TANANA_RELAIS_CODES` : codes d'invitation acceptés, séparés par des virgules ;
 //! - `TANANA_RELAIS_HOTELS_MAX` : nombre maximal d'hôtels (défaut 500) ;
-//! - `TANANA_RELAIS_INSCRIPTIONS_LIBRES=oui` : essai local uniquement.
+//! - `TANANA_RELAIS_INSCRIPTIONS_LIBRES=oui` : essai local uniquement ;
+//! - `TANANA_RELAIS_PAGES` : dossier de la page web de consultation
+//!   (`npm run build:web`) ; sans lui, le relais ne sert que l'API.
 
 use tanana_relais::{Reglages, Relais};
 
@@ -29,7 +31,14 @@ async fn main() {
     let relais = Relais::ouvrir(std::path::Path::new(&base), reglages).expect("ouverture de la base du relais");
     let ecouteur = tokio::net::TcpListener::bind(&ecoute).await.expect("adresse d'écoute");
     tracing::info!("relais Tanana à l'écoute sur {ecoute}");
-    axum::serve(ecouteur, relais.routes())
+    let routes = match var("TANANA_RELAIS_PAGES") {
+        Some(dossier) => {
+            tracing::info!("page de consultation servie depuis {dossier}");
+            relais.routes_avec_pages(std::path::Path::new(&dossier))
+        }
+        None => relais.routes(),
+    };
+    axum::serve(ecouteur, routes)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })

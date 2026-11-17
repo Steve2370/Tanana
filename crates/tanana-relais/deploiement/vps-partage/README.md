@@ -25,8 +25,8 @@ plus le projet qui tient les ports.
 git clone git@github.com:<compte>/Tanana.git ~/tanana
 cd ~/tanana/crates/tanana-relais/deploiement/vps-partage
 cp reglages.exemple .env && nano .env          # codes d'invitation
-nano relais.caddy                          # vrai nom de domaine
-cp relais.caddy ~/sites-caddy/tanana.caddy        # à refaire si relais.caddy change
+# Site du relais pour le Caddy existant (le fichier suivi par git reste intact)
+sed "s/relais.exemple.com/relais.mondomaine.com/" relais.caddy > ~/sites-caddy/tanana.caddy
 docker compose up -d --build
 docker exec <conteneur caddy> caddy reload --config /etc/caddy/Caddyfile
 curl https://relais.<domaine>/sante        # doit répondre : ok

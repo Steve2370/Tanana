@@ -5,6 +5,13 @@ son hôtel. L'hôtel y dépose ses changements **chiffrés de bout en bout** ;
 l'administrateur les télécharge et les déchiffre avec sa clé secrète.
 **Le relais ne peut rien lire** : ni noms, ni montants, ni nom d'hôtel.
 
+## Page web
+
+Le relais sert aussi la page de consultation (`src/web/` du projet, construite
+dans l'image Docker) : le propriétaire ouvre l'adresse du relais dans un
+navigateur, tape l'identifiant de l'hôtel et la clé secrète. Le déchiffrement
+se fait dans le navigateur : le relais ne voit jamais la clé.
+
 ## Ce qu'il garde
 
 Par hôtel : un identifiant court (`HK7Q-F29X`), l'empreinte de deux jetons
@@ -48,6 +55,7 @@ renvoyer tout l'historique par les hôtels en cas de panne du VPS.
 | `TANANA_RELAIS_CODES` | codes d'invitation | (aucun : inscriptions fermées) |
 | `TANANA_RELAIS_HOTELS_MAX` | nombre maximal d'hôtels | `500` |
 | `TANANA_RELAIS_INSCRIPTIONS_LIBRES=oui` | essai local seulement | non |
+| `TANANA_RELAIS_PAGES` | dossier de la page web (`npm run build:web`) | `/srv/consultation` dans l'image Docker |
 
 ## Essai local
 

@@ -6,15 +6,16 @@ import { Alerte, Bouton } from "./ui";
 /** Les trois informations à noter sur papier pour consulter l'hôtel à distance. */
 export function CodesANoter({ codes, onMasquer }: { codes: CodesDistance; onMasquer: () => void }) {
   const lignes: [string, string][] = [
-    ["Adresse du serveur", codes.relais],
+    ["Adresse à ouvrir dans un navigateur", codes.relais],
     ["Identifiant de l'hôtel", codes.hotel_id],
     ["Clé secrète", codes.cle_secrete],
   ];
   return (
     <div className="grid gap-4">
       <Alerte type="attention" titre="Notez ces trois informations sur papier">
-        Elles permettent de consulter l'hôtel depuis un autre ordinateur, même à l'étranger. Gardez-les à l'abri :
-        avec elles, on peut voir les comptes de l'hôtel (mais rien modifier).
+        Elles permettent de consulter l'hôtel de n'importe où, même à l'étranger : ouvrez l'adresse dans un navigateur
+        (ordinateur ou téléphone), puis tapez l'identifiant et la clé. Gardez-les à l'abri : avec elles, on peut voir
+        les comptes de l'hôtel (mais rien modifier).
       </Alerte>
       <dl data-testid="codes-distance" className="grid gap-3 rounded-xl border-2 border-dashed border-or bg-or-clair p-5">
         {lignes.map(([libelle, valeur]) => (

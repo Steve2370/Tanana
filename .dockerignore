@@ -2,3 +2,6 @@ target
 node_modules
 dist
 .git
+dist-web
+.qa
+mutants.out*

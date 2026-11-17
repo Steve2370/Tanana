@@ -1,0 +1,167 @@
+{
+  "attendu": {
+    "caisse_jour": {
+      "debut": "2026-11-17",
+      "depenses": 8000,
+      "encaissements": 296000,
+      "encaissements_par_mode": [
+        {
+          "mode": "especes",
+          "montant": 128000
+        },
+        {
+          "mode": "carte",
+          "montant": 138000
+        },
+        {
+          "mode": "mobile",
+          "montant": 30000
+        }
+      ],
+      "fin": "2026-11-18",
+      "net": 288000,
+      "remboursements": 0
+    },
+    "caisse_semaine": {
+      "debut": "2026-11-11",
+      "depenses": 11500,
+      "encaissements": 296000,
+      "encaissements_par_mode": [
+        {
+          "mode": "especes",
+          "montant": 128000
+        },
+        {
+          "mode": "carte",
+          "montant": 138000
+        },
+        {
+          "mode": "mobile",
+          "montant": 30000
+        }
+      ],
+      "fin": "2026-11-18",
+      "net": 284500,
+      "remboursements": 0
+    },
+    "chambres": 6,
+    "nom_hotel": "Hôtel du Lac",
+    "reservations": [
+      {
+        "chambre_id": "01a1eb09-04f6-755d-b2b9-039b45656aa5",
+        "chambre_numero": "101",
+        "client_id": "01a1eb09-04f7-71f3-bdeb-624e0832447a",
+        "client_nom": "Mbarga Aline",
+        "cree_le": "2026-11-17T19:43:19.288Z",
+        "date_arrivee": "2026-11-15",
+        "date_depart": "2026-11-18",
+        "id": "01a1eb09-04f8-70f5-bac6-dcc4a958225c",
+        "notes": null,
+        "nuits": 3,
+        "prix_total": 75000,
+        "solde": 48000,
+        "statut": "arrivee",
+        "taxes_ajoutees": 3000,
+        "total_a_payer": 78000,
+        "total_encaisse": 30000
+      },
+      {
+        "chambre_id": "01a1eb09-04f6-755d-b2b9-039d6a579249",
+        "chambre_numero": "102",
+        "client_id": "01a1eb09-04f7-71f3-bdeb-6250a82de32b",
+        "client_nom": "Rakoto Hery",
+        "cree_le": "2026-11-17T19:43:19.288Z",
+        "date_arrivee": "2026-11-17",
+        "date_depart": "2026-11-20",
+        "id": "01a1eb09-04f8-70f5-bac6-dcc61ec1717c",
+        "notes": null,
+        "nuits": 3,
+        "prix_total": 75000,
+        "solde": 78000,
+        "statut": "confirmee",
+        "taxes_ajoutees": 3000,
+        "total_a_payer": 78000,
+        "total_encaisse": 0
+      },
+      {
+        "chambre_id": "01a1eb09-04f7-71f3-bdeb-6246e1c38cf1",
+        "chambre_numero": "103",
+        "client_id": "01a1eb09-04f8-70f5-bac6-dcc2799fc2a0",
+        "client_nom": "Kouassi Jean",
+        "cree_le": "2026-11-17T19:43:19.289Z",
+        "date_arrivee": "2026-11-12",
+        "date_depart": "2026-11-15",
+        "id": "01a1eb09-04f9-7346-b1aa-0b2cd70c49a9",
+        "notes": null,
+        "nuits": 3,
+        "prix_total": 75000,
+        "solde": 0,
+        "statut": "partie",
+        "taxes_ajoutees": 3000,
+        "total_a_payer": 78000,
+        "total_encaisse": 78000
+      },
+      {
+        "chambre_id": "01a1eb09-04f7-71f3-bdeb-624a70e03304",
+        "chambre_numero": "201",
+        "client_id": "01a1eb09-04f7-71f3-bdeb-62524ddcc869",
+        "client_nom": "Ngono Paul",
+        "cree_le": "2026-11-17T19:43:19.289Z",
+        "date_arrivee": "2026-11-14",
+        "date_depart": "2026-11-17",
+        "id": "01a1eb09-04f9-7346-b1aa-0b28d388e383",
+        "notes": null,
+        "nuits": 3,
+        "prix_total": 135000,
+        "solde": 0,
+        "statut": "arrivee",
+        "taxes_ajoutees": 3000,
+        "total_a_payer": 138000,
+        "total_encaisse": 138000
+      },
+      {
+        "chambre_id": "01a1eb09-04f7-71f3-bdeb-624c81319410",
+        "chambre_numero": "202",
+        "client_id": "01a1eb09-04f7-71f3-bdeb-625423d4daed",
+        "client_nom": "Diallo Fatou",
+        "cree_le": "2026-11-17T19:43:19.289Z",
+        "date_arrivee": "2026-11-19",
+        "date_depart": "2026-11-22",
+        "id": "01a1eb09-04f9-7346-b1aa-0b2a350ea4c2",
+        "notes": null,
+        "nuits": 3,
+        "prix_total": 135000,
+        "solde": 88000,
+        "statut": "confirmee",
+        "taxes_ajoutees": 3000,
+        "total_a_payer": 138000,
+        "total_encaisse": 50000
+      }
+    ]
+  },
+  "aujourdhui": "2026-11-17",
+  "cle_secrete": "OZRG-YM2H-SDQQ-HWFM-M3IK-ZZRS-EE",
+  "hotel_id": "QJF5-SKJC",
+  "pages": [
+    {
+      "dernier_contact": "2026-11-17T19:43:19Z",
+      "lots": [
+        {
+          "lot": {
+            "chiffre": "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",
+            "nonce": "mHw5ia6qWw9DmmgxWEuTJmjSCFFJ5Zsz",
+            "seq_debut": 2,
+            "seq_fin": 136
+          },
+          "numero": 1,
+          "recu_le": "2026-11-17T19:43:19Z"
+        }
+      ],
+      "suite": false
+    }
+  ],
+  "temoin": {
+    "chiffre": "PBUcz0rh0KGk50jAk6hIaW992KTPM0FXiHfBGpdVhlTDpTggVLjCbGCmgBeQ",
+    "nonce": "AjX1mapbsj8+tGMEvk3ipl+15Vk5Vte3"
+  }
+}

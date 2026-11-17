@@ -37,6 +37,12 @@ pub struct Reglages {
     pub hotels_max: i64,
 }
 
+/// Politique de sécurité de la page : rien d'extérieur, aucun script en ligne,
+/// les requêtes ne vont qu'au relais lui-même.
+const CSP_PAGE: &str = "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; \
+     style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; \
+     form-action 'none'; frame-ancestors 'none'";
+
 #[derive(Clone)]
 pub struct Relais {
     base: Arc<Mutex<Connection>>,
@@ -124,6 +130,29 @@ impl Relais {
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         Ok(Self { base: Arc::new(Mutex::new(conn)), reglages: Arc::new(reglages) })
+    }
+
+    /// Routes du relais, plus la page web de consultation (fichiers statiques
+    /// du dossier `pages`, construits par `npm run build:web`). La page
+    /// déchiffre tout dans le navigateur : le serveur ne voit jamais la clé.
+    pub fn routes_avec_pages(self, pages: &std::path::Path) -> Router {
+        use axum::http::{HeaderName, HeaderValue, header};
+        use tower_http::services::{ServeDir, ServeFile};
+        use tower_http::set_header::SetResponseHeaderLayer;
+
+        let entete = |nom: HeaderName, valeur: &'static str| {
+            SetResponseHeaderLayer::if_not_present(nom, HeaderValue::from_static(valeur))
+        };
+        let fichiers = ServeDir::new(pages).not_found_service(ServeFile::new(pages.join("index.html")));
+        let page = Router::new()
+            .fallback_service(fichiers)
+            .layer(entete(header::CONTENT_SECURITY_POLICY, CSP_PAGE))
+            .layer(entete(header::REFERRER_POLICY, "no-referrer"))
+            .layer(entete(header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
+            .layer(entete(header::X_FRAME_OPTIONS, "DENY"))
+            .layer(entete(header::CACHE_CONTROL, "no-cache"))
+            .layer(entete(HeaderName::from_static("permissions-policy"), "camera=(), microphone=(), geolocation=()"));
+        self.routes().merge(page)
     }
 
     pub fn routes(self) -> Router {

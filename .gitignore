@@ -19,3 +19,6 @@ mutants.out*/
 
 # Codes d'invitation du relais (jamais sur GitHub)
 crates/tanana-relais/deploiement/vps-partage/.env
+
+# Page web de consultation construite (npm run build:web)
+dist-web/
