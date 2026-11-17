@@ -11,7 +11,13 @@ name: Publication
 #
 #   Variables : TAURI_UPDATER_PUBKEY (clé publique de mise à jour)
 #               TANANA_RELAIS (adresse du serveur de consultation à distance)
-#   Secrets   : TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#               DEPOT_VERSIONS (nom du dépôt PUBLIC qui reçoit les installeurs,
+#               ex. tanana-versions : les hôtels y téléchargent les mises à jour ;
+#               sans lui, tout reste dans ce dépôt et les mises à jour ne
+#               marchent que s'il est public)
+#   Secrets   : PUBLICATION_TOKEN (jeton GitHub avec accès en écriture au
+#               dépôt public, requis avec DEPOT_VERSIONS)
+#               TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 #               APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #               APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
 #               WINDOWS_CERTIFICATE, WINDOWS_CERTIFICATE_PASSWORD
@@ -33,13 +39,15 @@ jobs:
             args: ""
     runs-on: ${{ matrix.plateforme }}
     env:
+      # Dépôt qui reçoit les installeurs : le dépôt public s'il est configuré, sinon celui-ci
+      DEPOT: ${{ github.repository_owner }}/${{ vars.DEPOT_VERSIONS || github.event.repository.name }}
       # Adresse du serveur proposée par défaut dans l'application
       VITE_TANANA_RELAIS: ${{ vars.TANANA_RELAIS }}
       # Mise à jour automatique
       TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      TANANA_MISE_A_JOUR_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+      TANANA_MISE_A_JOUR_URL: https://github.com/${{ github.repository_owner }}/${{ vars.DEPOT_VERSIONS || github.event.repository.name }}/releases/latest/download/latest.json
       # Certificats : noms différents de ceux que lit Tauri, recopiés seulement s'ils existent
       SECRET_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       SECRET_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -54,6 +62,27 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+
+      - name: L'étiquette correspond-elle à la version de l'application ?
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::L'étiquette $GITHUB_REF_NAME ne correspond pas à la version $version. Lancez d'abord : npm run version:nouvelle -- ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+
+      - name: Vérifier la configuration du dépôt public
+        if: vars.DEPOT_VERSIONS != ''
+        shell: bash
+        env:
+          JETON: ${{ secrets.PUBLICATION_TOKEN }}
+        run: |
+          if [ -z "$JETON" ]; then
+            echo "::error::DEPOT_VERSIONS est réglé mais le secret PUBLICATION_TOKEN manque (jeton avec accès en écriture à $DEPOT)."
+            exit 1
+          fi
+          echo "Les installeurs et les mises à jour partiront dans $DEPOT."
 
       - name: Signature macOS (si le certificat Apple est fourni)
         if: runner.os == 'macOS' && env.SECRET_APPLE_CERTIFICATE != ''
@@ -100,8 +129,12 @@ jobs:
 
       - uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ vars.DEPOT_VERSIONS && secrets.PUBLICATION_TOKEN || secrets.GITHUB_TOKEN }}
         with:
+          owner: ${{ github.repository_owner }}
+          repo: ${{ vars.DEPOT_VERSIONS || github.event.repository.name }}
+          # Dans le dépôt public, l'étiquette de version se pose sur sa branche principale
+          releaseCommitish: ${{ vars.DEPOT_VERSIONS && 'main' || github.sha }}
           tagName: ${{ github.ref_name }}
           releaseName: Tanana ${{ github.ref_name }}
           # Affiché dans Tanana au moment de proposer la mise à jour
@@ -116,7 +149,7 @@ jobs:
         if: runner.os == 'macOS' && env.SECRET_APPLE_CERTIFICATE != '' && env.APPLE_ID != ''
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ vars.DEPOT_VERSIONS && secrets.PUBLICATION_TOKEN || secrets.GITHUB_TOKEN }}
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -125,8 +158,8 @@ jobs:
           xcrun stapler staple "$dmg"
           spctl -a -vvv -t install "$dmg"
           # Remplacer le .dmg déposé par tauri-action par la version certifiée
-          for nom in $(gh release view "$VERSION" --json assets -q '.assets[].name' | grep '\.dmg$' || true); do
-            gh release delete-asset "$VERSION" "$nom" -y
+          for nom in $(gh release view "$VERSION" --repo "$DEPOT" --json assets -q '.assets[].name' | grep '\.dmg$' || true); do
+            gh release delete-asset "$VERSION" "$nom" --repo "$DEPOT" -y
           done
-          gh release upload "$VERSION" "$dmg"
+          gh release upload "$VERSION" "$dmg" --repo "$DEPOT"
           echo "Installeur .dmg certifié par Apple : $(basename "$dmg")"

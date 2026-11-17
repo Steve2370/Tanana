@@ -60,8 +60,8 @@ Un Mac ne produit que l'installeur Mac, et Windows que celui de Windows. Pour le
 
 ### Publier une version (GitHub)
 
-1. Mettez le numéro de version dans `package.json`, `src-tauri/tauri.conf.json` et `Cargo.toml` (`[workspace.package]`), et écrivez les nouveautés dans `NOUVEAUTES.md` (court : elles s'affichent dans Tanana quand la mise à jour est proposée).
-2. `git tag v0.2.0 && git push --tags` : le workflow `publication.yml` construit les installeurs Mac (Intel + Apple Silicon) et Windows, et les attache à une release **en brouillon**.
+1. `npm run version:nouvelle -- 0.2.0` change le numéro partout (`package.json`, `tauri.conf.json`, `Cargo.toml`…). Écrivez les nouveautés dans `NOUVEAUTES.md` (court : elles s'affichent dans Tanana quand la mise à jour est proposée).
+2. `git commit -am "Version 0.2.0" && git tag v0.2.0 && git push && git push origin v0.2.0` : le workflow `publication.yml` construit les installeurs Mac (Intel + Apple Silicon) et Windows, et les attache à une release **en brouillon** dans le dépôt public des versions. Il refuse de partir si l'étiquette ne correspond pas à la version.
 3. Essayez les installeurs du brouillon, puis cliquez « Publish release » : c'est seulement là que les hôtels voient la mise à jour.
 
 Tout est optionnel : sans réglages, les installeurs sont construits sans signature et sans mise à jour automatique. À régler une fois dans *Settings › Secrets and variables › Actions* du dépôt :
@@ -72,10 +72,12 @@ Tout est optionnel : sans réglages, les installeurs sont construits sans signat
 | **Signature Apple** (+ notarisation) | | `APPLE_CERTIFICATE` (certificat « Developer ID Application » exporté en .p12, en base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (ex. `Developer ID Application: Brice … (TEAMID)`), `APPLE_ID`, `APPLE_PASSWORD` (mot de passe d'application, appleid.apple.com), `APPLE_TEAM_ID` |
 | **Signature Windows** | | `WINDOWS_CERTIFICATE` (.pfx en base64), `WINDOWS_CERTIFICATE_PASSWORD` |
 | Serveur de consultation à distance proposé par défaut | `TANANA_RELAIS` : `https://votre-domaine` | |
+| **Dépôt public des versions** (le code reste privé) | `DEPOT_VERSIONS` : nom du dépôt public, ex. `tanana-versions` | `PUBLICATION_TOKEN` : jeton GitHub *fine-grained*, accès à ce seul dépôt, « Contents : Read and write » |
 
 - Clés de mise à jour, **une seule fois**, sur votre Mac : `npm run tauri signer generate -- -w ~/.tauri/tanana.key`. Gardez la clé privée et son mot de passe en lieu sûr (gestionnaire de mots de passe) : **perdues, plus aucune mise à jour ne pourra être envoyée** aux hôtels déjà installés. Ne la mettez jamais dans le dépôt.
 - Base64 d'un certificat : `base64 -i certificat.p12 | pbcopy` (Mac), puis collez dans le secret.
-- Les hôtels cherchent `https://github.com/<vous>/<dépôt>/releases/latest/download/latest.json` (fichier ajouté à la release par le workflow) : le dépôt doit être **public**, ou les releases servies depuis votre propre serveur (changez `TANANA_MISE_A_JOUR_URL` dans le workflow).
+- Les hôtels cherchent `https://github.com/<vous>/<DEPOT_VERSIONS>/releases/latest/download/latest.json` (fichier ajouté à la release par le workflow). Le code reste dans le dépôt privé ; seuls les installeurs et ce fichier vont dans le dépôt **public** des versions, qui doit avoir au moins un fichier (un README suffit). Sans `DEPOT_VERSIONS`, tout reste dans le dépôt du code, et les mises à jour ne marchent que s'il est public.
+- Le jeton `PUBLICATION_TOKEN` expire : notez la date et renouvelez-le avant, sinon la publication échoue (les installations existantes, elles, continuent de fonctionner).
 - Dans Tanana, la mise à jour est proposée aux administrateurs (bandeau, et *Réglages › Mises à jour*), jamais imposée : copie de sécurité, téléchargement, redémarrage. La réception n'est pas dérangée.
 
 ### Essayer sur un vrai Mac et un vrai Windows (avant le premier hôtel)

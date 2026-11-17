@@ -10,6 +10,7 @@
     "dev:web": "vite --config vite.web.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "version:nouvelle": "node scripts/nouvelle-version.mjs",
     "qa:fuzz": "vitest run src/qa",
     "qa:fenetres": "node scripts/qa-fenetres.mjs",
     "qa:mutants": "cargo mutants -p tanana-core --output .qa/rust",
