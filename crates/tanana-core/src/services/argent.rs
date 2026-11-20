@@ -185,7 +185,9 @@ impl Tanana {
                 Some("reservation"),
                 Some(reservation_id),
                 Some(&json!({ "encaisse": encaisse, "solde": reste_avant, "groupe": r.groupe_id })),
-                Some(&json!({ "paiement": en_json(&p)?, "motif": motif, "solde": nouveau_solde, "groupe": r.groupe_id })),
+                Some(
+                    &json!({ "paiement": en_json(&p)?, "motif": motif, "solde": nouveau_solde, "groupe": r.groupe_id }),
+                ),
             )?;
             Ok(p)
         })

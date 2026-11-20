@@ -91,7 +91,9 @@ fn seul_un_compte_avec_les_reglages_peut_le_changer_mais_tout_le_monde_le_voit()
 
 /// Le cadre du logo sur la première page, s'il y en a un.
 fn cadre_logo(c: &tanana_core::services::documents::ContenuDocument) -> Option<(f32, f32)> {
-    pdf::mise_en_page(c, false)[0].iter().find_map(|o| if let Op::Logo { l, h, .. } = o { Some((*l, *h)) } else { None })
+    pdf::mise_en_page(c, false)[0]
+        .iter()
+        .find_map(|o| if let Op::Logo { l, h, .. } = o { Some((*l, *h)) } else { None })
 }
 
 #[test]
@@ -105,9 +107,8 @@ fn le_logo_est_imprime_et_les_anciens_documents_gardent_le_leur() {
     assert_eq!(cadre_logo(&sans.contenu), None);
 
     h.t.definir_logo(&h.admin, Some(png())).unwrap();
-    let p = h
-        .t
-        .encaisser(
+    let p =
+        h.t.encaisser(
             &h.admin,
             Encaissement {
                 reservation_id: r.id.clone(),
@@ -147,7 +148,10 @@ fn taille_du_logo_sur_le_document() {
         let (pl, ph) = pdf::taille_logo(l, h);
         assert!(pl <= LOGO_L_MAX + 0.01 && ph <= LOGO_H_MAX + 0.01, "{l}×{h} déborde");
         assert!((pl / ph - l as f32 / h as f32).abs() < 0.01 * (l as f32 / h as f32), "{l}×{h} déformé");
-        assert!((pl - LOGO_L_MAX).abs() < 0.01 || (ph - LOGO_H_MAX).abs() < 0.01, "{l}×{h} : prend toute la place possible");
+        assert!(
+            (pl - LOGO_L_MAX).abs() < 0.01 || (ph - LOGO_H_MAX).abs() < 0.01,
+            "{l}×{h} : prend toute la place possible"
+        );
     }
     // Image vide (protection) : pas de division par zéro
     let (pl, ph) = pdf::taille_logo(0, 0);
@@ -155,7 +159,8 @@ fn taille_du_logo_sur_le_document() {
 }
 
 /// PNG gris de 2000 × 1, 1 × 2000 et 1 × 2001.
-const PNG_2000_1: &str = "iVBORw0KGgoAAAANSUhEUgAAB9AAAAABCAAAAACjlmqhAAAAGElEQVR42mNsYBgFo2AUjIJRMApGwVAHAPfPAIIWImnCAAAAAElFTkSuQmCC";
+const PNG_2000_1: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAB9AAAAABCAAAAACjlmqhAAAAGElEQVR42mNsYBgFo2AUjIJRMApGwVAHAPfPAIIWImnCAAAAAElFTkSuQmCC";
 const PNG_1_2000: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAfQCAAAAAAmu2pRAAAAHklEQVR42u3CMQ0AAAwDoKbKK30y9hDIGgAAAODXAekPEB/OVQrKAAAAAElFTkSuQmCC";
 const PNG_1_2001: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAfRCAAAAADt57n0AAAAHklEQVR42u3CMQ0AAAwDoKbKK30y9hDIGgAAAODbAQlgECHtAho/AAAAAElFTkSuQmCC";
 

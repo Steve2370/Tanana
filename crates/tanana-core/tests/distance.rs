@@ -140,9 +140,8 @@ fn un_groupe_arrive_chez_l_administrateur_avec_son_compte() {
     let tc = h.type_chambre("Suite", 60_000);
     let (c2, c3) = (h.chambre("201", &tc.id), h.chambre("202", &tc.id));
     let cl = h.client("SOGEA");
-    let g = h
-        .t
-        .creer_groupe(
+    let g =
+        h.t.creer_groupe(
             &h.admin,
             NouveauGroupe {
                 client_id: cl.id,

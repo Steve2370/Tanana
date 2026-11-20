@@ -857,7 +857,8 @@ pub fn verifier_image(format: FormatLogo, octets: &[u8]) -> Resultat<(u32, u32)>
         s.finish();
         page.finish();
     }
-    doc.finish().map_err(|_| Erreur::Validation("cette image est illisible : choisissez un fichier PNG ou JPEG".into()))?;
+    doc.finish()
+        .map_err(|_| Erreur::Validation("cette image est illisible : choisissez un fichier PNG ou JPEG".into()))?;
     if taille.0 == 0 || taille.1 == 0 {
         return Err(Erreur::Validation("cette image est vide".into()));
     }

@@ -23,14 +23,10 @@ pub const COTE_MAX: u32 = 2_000;
 
 fn lire(conn: &Connection, empreinte: &str) -> Resultat<Option<Logo>> {
     Ok(conn
-        .query_row(
-            "SELECT format, donnees, largeur, hauteur FROM logos WHERE empreinte = ?1",
-            [empreinte],
-            |r| {
-                let format: String = r.get(0)?;
-                Ok((format, r.get::<_, String>(1)?, r.get::<_, u32>(2)?, r.get::<_, u32>(3)?))
-            },
-        )
+        .query_row("SELECT format, donnees, largeur, hauteur FROM logos WHERE empreinte = ?1", [empreinte], |r| {
+            let format: String = r.get(0)?;
+            Ok((format, r.get::<_, String>(1)?, r.get::<_, u32>(2)?, r.get::<_, u32>(3)?))
+        })
         .optional()?
         .and_then(|(format, donnees, largeur, hauteur)| {
             FormatLogo::depuis_texte(&format).map(|format| Logo { format, donnees, largeur, hauteur })

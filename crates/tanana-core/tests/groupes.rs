@@ -26,10 +26,7 @@ fn hotel_et_chambres() -> (Hotel, Vec<Chambre>, Client) {
 fn nouveau(cl: &Client, chambres: &[(&Chambre, Option<i64>)], a: &str, dep: &str) -> NouveauGroupe {
     NouveauGroupe {
         client_id: cl.id.clone(),
-        chambres: chambres
-            .iter()
-            .map(|(c, p)| ChambreDuGroupe { chambre_id: c.id.clone(), prix_total: *p })
-            .collect(),
+        chambres: chambres.iter().map(|(c, p)| ChambreDuGroupe { chambre_id: c.id.clone(), prix_total: *p }).collect(),
         date_arrivee: d(a),
         date_depart: d(dep),
         nom: Some("Équipe SOGEA".into()),
@@ -40,9 +37,8 @@ fn nouveau(cl: &Client, chambres: &[(&Chambre, Option<i64>)], a: &str, dep: &str
 /// Groupe de 3 chambres du 10 au 12 mars : 101 et 102 au prix normal (50 000), la suite à 100 000 convenu.
 fn groupe_de_trois() -> (Hotel, Groupe, Vec<Chambre>) {
     let (mut h, ch, cl) = hotel_et_chambres();
-    let g = h
-        .t
-        .creer_groupe(
+    let g =
+        h.t.creer_groupe(
             &h.admin,
             nouveau(&cl, &[(&ch[0], None), (&ch[1], None), (&ch[3], Some(100_000))], "2026-03-10", "2026-03-12"),
         )
@@ -70,7 +66,9 @@ fn tout(d: &DocumentImprime) -> String {
 fn texte(c: &ContenuDocument, duplicata: bool) -> String {
     pdf::mise_en_page(c, duplicata)
         .into_iter()
-        .flat_map(|ops| ops.into_iter().filter_map(|o| if let Op::Texte { texte, .. } = o { Some(texte) } else { None }))
+        .flat_map(|ops| {
+            ops.into_iter().filter_map(|o| if let Op::Texte { texte, .. } = o { Some(texte) } else { None })
+        })
         .collect::<Vec<_>>()
         .join("\n")
         .replace('\u{a0}', " ")
@@ -85,7 +83,10 @@ fn un_groupe_reserve_plusieurs_chambres_aux_memes_dates() {
     assert_eq!(numeros, ["101", "102", "201"]);
     for r in &g.reservations {
         assert_eq!(r.groupe_id.as_deref(), Some(g.id.as_str()));
-        assert_eq!((r.date_arrivee, r.date_depart, r.statut), (d("2026-03-10"), d("2026-03-12"), StatutReservation::Confirmee));
+        assert_eq!(
+            (r.date_arrivee, r.date_depart, r.statut),
+            (d("2026-03-10"), d("2026-03-12"), StatutReservation::Confirmee)
+        );
         assert_eq!(r.notes.as_deref(), Some("Facture au nom de l'entreprise"));
     }
     assert_eq!(g.reservations[2].prix_total, 100_000, "prix convenu pour la suite");
@@ -102,25 +103,25 @@ fn un_groupe_reserve_plusieurs_chambres_aux_memes_dates() {
     assert_eq!(actions.iter().filter(|a| *a == "groupe.creation").count(), 1);
     assert_eq!(actions.iter().filter(|a| *a == "reservation.creation").count(), 3);
     // Le journal dit quel groupe, pour qui, quelles chambres et combien
-    let entree = h
-        .t
-        .journal(&h.admin, FiltreJournal { action_prefixe: Some("groupe.".into()), ..Default::default() })
-        .unwrap()
-        .remove(0);
+    let entree =
+        h.t.journal(&h.admin, FiltreJournal { action_prefixe: Some("groupe.".into()), ..Default::default() })
+            .unwrap()
+            .remove(0);
     assert_eq!(entree.entite_id.as_deref(), Some(g.id.as_str()));
     assert_eq!(
         entree.apres,
-        Some(serde_json::json!({ "nom": "Équipe SOGEA", "client": "SOGEA", "chambres": ["101", "102", "201"], "total_a_payer": 200_000 }))
+        Some(
+            serde_json::json!({ "nom": "Équipe SOGEA", "client": "SOGEA", "chambres": ["101", "102", "201"], "total_a_payer": 200_000 })
+        )
     );
 }
 
 #[test]
 fn une_chambre_offerte_a_un_prix_de_zero_est_acceptee() {
     let (mut h, ch, cl) = hotel_et_chambres();
-    let g = h
-        .t
-        .creer_groupe(&h.admin, nouveau(&cl, &[(&ch[0], None), (&ch[1], Some(0))], "2026-03-10", "2026-03-12"))
-        .unwrap();
+    let g =
+        h.t.creer_groupe(&h.admin, nouveau(&cl, &[(&ch[0], None), (&ch[1], Some(0))], "2026-03-10", "2026-03-12"))
+            .unwrap();
     assert_eq!(g.reservations[1].prix_total, 0);
     assert_eq!(g.total_a_payer, 50_000);
 }
@@ -131,11 +132,18 @@ fn refuse_un_groupe_incorrect_sans_rien_creer() {
     let essai = |h: &mut Hotel, g: NouveauGroupe| h.t.creer_groupe(&h.admin, g);
 
     // Une seule chambre, la même deux fois
-    assert!(matches!(essai(&mut h, nouveau(&cl, &[(&ch[0], None)], "2026-03-10", "2026-03-12")), Err(Erreur::Validation(m)) if m.contains("deux chambres")));
-    assert!(matches!(essai(&mut h, nouveau(&cl, &[(&ch[0], None), (&ch[0], None)], "2026-03-10", "2026-03-12")), Err(Erreur::Validation(m)) if m.contains("deux fois")));
+    assert!(
+        matches!(essai(&mut h, nouveau(&cl, &[(&ch[0], None)], "2026-03-10", "2026-03-12")), Err(Erreur::Validation(m)) if m.contains("deux chambres"))
+    );
+    assert!(
+        matches!(essai(&mut h, nouveau(&cl, &[(&ch[0], None), (&ch[0], None)], "2026-03-10", "2026-03-12")), Err(Erreur::Validation(m)) if m.contains("deux fois"))
+    );
     // Dates à l'envers, prix négatif, nom trop long, client inconnu
     assert!(essai(&mut h, nouveau(&cl, &[(&ch[0], None), (&ch[1], None)], "2026-03-12", "2026-03-10")).is_err());
-    assert!(matches!(essai(&mut h, nouveau(&cl, &[(&ch[0], None), (&ch[1], Some(-5))], "2026-03-10", "2026-03-12")), Err(Erreur::MontantInvalide(_))));
+    assert!(matches!(
+        essai(&mut h, nouveau(&cl, &[(&ch[0], None), (&ch[1], Some(-5))], "2026-03-10", "2026-03-12")),
+        Err(Erreur::MontantInvalide(_))
+    ));
     let mut long = nouveau(&cl, &[(&ch[0], None), (&ch[1], None)], "2026-03-10", "2026-03-12");
     long.nom = Some("x".repeat(81));
     assert!(matches!(essai(&mut h, long), Err(Erreur::Validation(m)) if m.contains("80")));
@@ -179,9 +187,11 @@ fn un_seul_compte_pour_tout_le_groupe() {
     let g2 = h.t.obtenir_groupe(&h.admin, &g.id).unwrap();
     assert_eq!((g2.total_encaisse, g2.solde), (110_000, 90_000));
     // Le journal garde le reste du groupe avant et après le remboursement
-    let entree = h
-        .t
-        .journal(&h.admin, FiltreJournal { action_prefixe: Some("paiement.remboursement".into()), ..Default::default() })
+    let entree =
+        h.t.journal(
+            &h.admin,
+            FiltreJournal { action_prefixe: Some("paiement.remboursement".into()), ..Default::default() },
+        )
         .unwrap()
         .remove(0);
     assert_eq!(entree.avant.as_ref().unwrap()["solde"], 0);
@@ -232,7 +242,10 @@ fn ajouter_une_chambre_au_groupe_a_ses_dates() {
     let g2 = h.t.ajouter_au_groupe(&h.admin, &g.id, &ch[2].id, Some(40_000)).unwrap();
     assert_eq!(g2.reservations.len(), 4);
     let nouvelle = g2.reservations.iter().find(|r| r.chambre_id == ch[2].id).unwrap();
-    assert_eq!((nouvelle.date_arrivee, nouvelle.date_depart, nouvelle.prix_total), (d("2026-03-10"), d("2026-03-12"), 40_000));
+    assert_eq!(
+        (nouvelle.date_arrivee, nouvelle.date_depart, nouvelle.prix_total),
+        (d("2026-03-10"), d("2026-03-12"), 40_000)
+    );
     assert_eq!(g2.total_a_payer, 240_000);
     assert!(h.actions().contains(&"groupe.ajout".to_string()));
     // Déjà dans le groupe : la chambre est prise
@@ -280,7 +293,10 @@ fn une_seule_facture_avec_toutes_les_chambres() {
     // Le reçu parle du groupe
     let recu = h.t.imprimer_recu(&h.admin, &p.id, 60).unwrap();
     let t = tout(&recu);
-    assert!(t.replace('\n', " ").contains("Acompte pour le groupe, chambres 101, 102 et 201, du 10 au 12 mars 2026"), "{t}");
+    assert!(
+        t.replace('\n', " ").contains("Acompte pour le groupe, chambres 101, 102 et 201, du 10 au 12 mars 2026"),
+        "{t}"
+    );
     assert_eq!((recu.contenu.total_paye, recu.contenu.reste), (60_000, 140_000));
 
     // Un nouveau paiement : nouvelle facture qui remplace l'ancienne
@@ -324,9 +340,11 @@ fn les_taxes_du_groupe_s_additionnent() {
         ],
     )
     .unwrap();
-    let g = h
-        .t
-        .creer_groupe(&h.admin, nouveau(&cl, &[(&ch[0], None), (&ch[1], None), (&ch[2], None)], "2026-03-10", "2026-03-13"))
+    let g =
+        h.t.creer_groupe(
+            &h.admin,
+            nouveau(&cl, &[(&ch[0], None), (&ch[1], None), (&ch[2], None)], "2026-03-10", "2026-03-13"),
+        )
         .unwrap();
     // 3 chambres × 3 nuits × 25 000 = 225 000, plus 9 nuits × 2 000 de taxe de séjour
     assert_eq!(g.total_a_payer, 225_000 + 18_000);
@@ -403,7 +421,9 @@ fn un_groupe_parti_ne_prend_plus_de_chambre() {
         h.t.annuler_reservation(&h.admin, &r.id, "finalement non").unwrap();
     }
     h.t.enregistrer_depart(&h.admin, &ids[1]).unwrap();
-    assert!(matches!(h.t.ajouter_au_groupe(&h.admin, &g.id, &ch[2].id, None), Err(Erreur::Validation(m)) if m.contains("déjà parti")));
+    assert!(
+        matches!(h.t.ajouter_au_groupe(&h.admin, &g.id, &ch[2].id, None), Err(Erreur::Validation(m)) if m.contains("déjà parti"))
+    );
 }
 
 #[test]
@@ -426,10 +446,11 @@ fn chaque_chambre_connait_le_reste_de_son_groupe() {
 fn les_taxes_de_plusieurs_chambres_s_additionnent_champ_par_champ() {
     use tanana_core::domaine::calculer_taxes;
     use tanana_core::services::documents::cumuler_taxes;
-    let sejour = Taxe { libelle: "Taxe de séjour".into(), calcul: CalculTaxe::ParNuit, valeur: 1_000, comprise: false };
+    let sejour =
+        Taxe { libelle: "Taxe de séjour".into(), calcul: CalculTaxe::ParNuit, valeur: 1_000, comprise: false };
     let tva = Taxe { libelle: "TVA".into(), calcul: CalculTaxe::Pourcentage, valeur: 1_000, comprise: true };
     let a = calculer_taxes(110_000, 2, &[sejour.clone(), tva.clone()]);
-    let b = calculer_taxes(55_000, 3, &[sejour.clone()]);
+    let b = calculer_taxes(55_000, 3, std::slice::from_ref(&sejour));
     let t = cumuler_taxes(&[a.clone(), b.clone()]);
     assert_eq!(t.prix, 165_000);
     assert_eq!(t.nuits, 5);

@@ -282,8 +282,7 @@ fn client_doc(conn: &Connection, client_id: &str) -> Resultat<ClientDoc> {
 /// Base d'un document de groupe : toutes les chambres, tous les paiements.
 fn base_groupe(conn: &Connection, groupe_id: &str, decalage: Duration) -> Resultat<Base> {
     let g = groupe(conn, groupe_id)?;
-    let actives: Vec<&Reservation> =
-        g.reservations.iter().filter(|r| r.statut != StatutReservation::Annulee).collect();
+    let actives: Vec<&Reservation> = g.reservations.iter().filter(|r| r.statut != StatutReservation::Annulee).collect();
     let chambres = actives.iter().map(|r| sejour_doc(conn, r)).collect::<Resultat<Vec<_>>>()?;
     let premiere = actives.first().copied().or(g.reservations.first()).ok_or(Erreur::Introuvable("groupe".into()))?;
     let ids: Vec<&str> = g.reservations.iter().map(|r| r.id.as_str()).collect();
@@ -551,7 +550,11 @@ impl Tanana {
             };
             let precedente = match &groupe_id {
                 Some(g) => lire_document(tx, "d.type = 'facture' AND d.groupe_id = ?1", g)?,
-                None => lire_document(tx, "d.type = 'facture' AND d.reservation_id = ?1 AND d.groupe_id IS NULL", reservation_id)?,
+                None => lire_document(
+                    tx,
+                    "d.type = 'facture' AND d.reservation_id = ?1 AND d.groupe_id IS NULL",
+                    reservation_id,
+                )?,
             };
             if let Some((doc, contenu, emp_precedente)) = &precedente
                 && *emp_precedente == emp

@@ -109,7 +109,20 @@ fn lire_brut(conn: &Connection, sql_fin: &str, p: impl rusqlite::Params) -> Resu
     bruts
         .into_iter()
         .map(
-            |(id, chambre_id, chambre_numero, client_id, client_nom, arrivee, depart, prix, statut, notes, cree_le, groupe_id)| {
+            |(
+                id,
+                chambre_id,
+                chambre_numero,
+                client_id,
+                client_nom,
+                arrivee,
+                depart,
+                prix,
+                statut,
+                notes,
+                cree_le,
+                groupe_id,
+            )| {
                 let nuits = (depart - arrivee).num_days();
                 let encaisse = total_encaisse(&paiements_de(conn, &id)?);
                 let taxes = calculer_taxes(prix, nuits, &taxes_de(conn, &id)?);
@@ -149,7 +162,14 @@ pub(crate) fn groupe(conn: &Connection, id: &str) -> Resultat<Groupe> {
             "SELECT g.nom, g.client_id, trim(cl.nom || ' ' || coalesce(cl.prenom, '')), g.cree_le
              FROM groupes g JOIN clients cl ON cl.id = g.client_id WHERE g.id = ?1",
             [id],
-            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            },
         )
         .optional()?
         .ok_or_else(|| Erreur::Introuvable("groupe".into()))?;
@@ -421,7 +441,11 @@ impl Tanana {
                 .iter()
                 .find(|r| r.statut != StatutReservation::Annulee)
                 .ok_or_else(|| Erreur::Validation("toutes les chambres de ce groupe sont annulées".into()))?;
-            if avant.reservations.iter().all(|r| r.statut == StatutReservation::Partie || r.statut == StatutReservation::Annulee) {
+            if avant
+                .reservations
+                .iter()
+                .all(|r| r.statut == StatutReservation::Partie || r.statut == StatutReservation::Annulee)
+            {
                 return Err(Erreur::Validation("ce groupe est déjà parti".into()));
             }
             inserer_reservation(
