@@ -96,3 +96,22 @@ export const DEVISES: { code: string; nom: string; decimales: number }[] = [
   { code: "EUR", nom: "Euro", decimales: 2 },
   { code: "USD", nom: "Dollar américain", decimales: 2 },
 ];
+
+/** Ce qui reste dû sur une chambre : pour une chambre de groupe, c'est le reste du groupe entier. */
+export function resteDe(r: { solde: number; solde_groupe: number | null }): number {
+  return r.solde_groupe ?? r.solde;
+}
+
+/**
+ * Reste dû sur plusieurs séjours (non annulés) : chaque groupe ne compte qu'une fois,
+ * avec son propre reste (les paiements d'un groupe peuvent être sur n'importe quelle chambre).
+ */
+export function resteDesSejours(liste: { solde: number; solde_groupe: number | null; groupe_id: string | null }[]): number {
+  const groupes = new Map<string, number>();
+  let reste = 0;
+  for (const r of liste) {
+    if (r.groupe_id !== null && r.solde_groupe !== null) groupes.set(r.groupe_id, Math.max(0, r.solde_groupe));
+    else reste += Math.max(0, r.solde);
+  }
+  return reste + [...groupes.values()].reduce((a, b) => a + b, 0);
+}

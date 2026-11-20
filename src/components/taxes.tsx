@@ -9,6 +9,29 @@ import { CALCULS, LIBELLE_CALCUL, libelleTaxe, lireTaxes, nouvelleCle, versSaisi
 import { Alerte, Bouton, Champ } from "./ui";
 
 /** Liste lisible des taxes d'un séjour, avec leurs montants. */
+/**
+ * Taxes de plusieurs chambres additionnées ligne par ligne (même taxe = même ligne),
+ * comme sur la facture d'un groupe (calcul de Rust : cumuler_taxes).
+ */
+export function cumulerTaxes(details: DetailTaxes[]): DetailTaxes {
+  const total: DetailTaxes = { prix: 0, nuits: 0, lignes: [], total_comprises: 0, total_ajoutees: 0, hors_taxes: 0, total_a_payer: 0 };
+  const meme = (a: Taxe, b: Taxe) => a.libelle === b.libelle && a.calcul === b.calcul && a.valeur === b.valeur && a.comprise === b.comprise;
+  for (const d of details) {
+    total.prix += d.prix;
+    total.nuits += d.nuits;
+    total.total_comprises += d.total_comprises;
+    total.total_ajoutees += d.total_ajoutees;
+    total.hors_taxes += d.hors_taxes;
+    total.total_a_payer += d.total_a_payer;
+    for (const l of d.lignes) {
+      const deja = total.lignes.find((x) => meme(x.taxe, l.taxe));
+      if (deja) deja.montant += l.montant;
+      else total.lignes.push({ taxe: l.taxe, montant: l.montant });
+    }
+  }
+  return total;
+}
+
 export function ResumeTaxes({ detail, devise }: { detail: DetailTaxes; devise: Devise }) {
   const m = (v: number) => formatMontant(v, devise);
   return (

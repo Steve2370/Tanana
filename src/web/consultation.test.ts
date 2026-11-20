@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import demo from "./__fixtures__/hotel-demo.json";
 import { CleIncorrecte, lireCle, normaliserIdentifiant, preparerCles } from "./crypto";
 import { Copie, ErreurConsultation, TABLES_ENVOYEES, mettreAJour, verifierCle, type PageLots } from "./relais";
-import { SENSIBLES, caisse, hotel, journal, journee, planning, reservations, taxesAjoutees } from "./vues";
+import { SENSIBLES, caisse, hotel, journal, journee, planning, reservations, resteDe, taxesAjoutees } from "./vues";
 
 type Fixture = typeof demo;
 
@@ -253,6 +253,32 @@ describe("Cas absents de l'hôtel de démonstration", () => {
     expect(j.chambres.map((c) => c.etat)).toEqual(["libre", "libre"]);
     // Remboursement : le reste dû tient compte de l'argent rendu
     expect(reservations(copie).find((r) => r.id === "r1")).toMatchObject({ total_encaisse: 52_000, solde: -2_000 });
+  });
+
+  it("groupe : un seul compte pour ses chambres, compté une seule fois dans le reste à encaisser", () => {
+    const copie = copieMinimale();
+    const ecrire = (t: string, d: Record<string, unknown>) => ({ t, o: "ecrire" as const, c: [d.id], d });
+    copie.appliquer([
+      ecrire("chambres", { id: "c3", numero: "3", type_id: "t1", statut: "disponible" }),
+      ecrire("groupes", { id: "g1", client_id: "k1", nom: "Équipe SOGEA" }),
+      ecrire("reservations", { id: "r3", chambre_id: "c2", client_id: "k1", date_arrivee: J, date_depart: "2026-11-19", prix_total: 50_000, statut: "arrivee", groupe_id: "g1" }),
+      ecrire("reservations", { id: "r4", chambre_id: "c3", client_id: "k1", date_arrivee: J, date_depart: "2026-11-19", prix_total: 50_000, statut: "arrivee", groupe_id: "g1" }),
+      ecrire("reservations", { id: "r5", chambre_id: "c3", client_id: "k1", date_arrivee: "2026-12-01", date_depart: "2026-12-02", prix_total: 30_000, statut: "annulee", groupe_id: "g1" }),
+      // Tout l'acompte du groupe est enregistré sur une seule chambre, et 10 000 sur la chambre annulée
+      ecrire("paiements", { id: "p9", reservation_id: "r3", montant: 60_000, type: "acompte", mode: "especes", date: `${J}T12:00:00.000Z`, utilisateur_id: "u1" }),
+      ecrire("paiements", { id: "p10", reservation_id: "r5", montant: 10_000, type: "acompte", mode: "especes", date: `${J}T12:00:00.000Z`, utilisateur_id: "u1" }),
+    ]);
+    const vues = reservations(copie);
+    const r3 = vues.find((r) => r.id === "r3")!;
+    const r4 = vues.find((r) => r.id === "r4")!;
+    // 100 000 dus (la chambre annulée ne compte pas), 70 000 payés en tout
+    const attendu = { id: "g1", nom: "Équipe SOGEA", chambres: 2, total_a_payer: 100_000, total_encaisse: 70_000, solde: 30_000 };
+    expect(r3.groupe).toEqual(attendu);
+    expect(r4.groupe).toEqual(attendu);
+    expect(vues.find((r) => r.id === "r1")!.groupe).toBeNull();
+    // Deux chambres présentes du même groupe : 30 000 à encaisser, pas 60 000
+    expect(journee(copie, vues, J).resteAEncaisser).toBe(30_000);
+    expect(resteDe([r3, r4])).toBe(30_000);
   });
 
   it("taxes : arrondi au plus proche, comme Tanana", () => {

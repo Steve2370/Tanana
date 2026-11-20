@@ -166,27 +166,29 @@ export function Caisse() {
       {fenetre}
       <EnTete titre="Caisse" sousTitre="L'argent qui est entré et celui qui est sorti." />
 
-      <div className="mb-6 flex flex-wrap items-start gap-x-8 gap-y-4">
-        <div role="group" aria-label="Période" className="flex flex-wrap gap-1 rounded-xl bg-sable p-1.5">
-          {PERIODES.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              aria-pressed={choix === p.id}
-              onClick={() => {
-                setChoix(p.id);
-                setMessage(null);
-              }}
-              className={`min-h-12 rounded-lg px-4 text-base font-semibold ${choix === p.id ? "bg-white text-marque-fonce shadow-sm" : "text-gris hover:text-encre"}`}
-            >
-              {p.libelle}
-            </button>
-          ))}
+      {(voitArgent || voitDepenses) && (
+        <div className="mb-6 flex flex-wrap items-start gap-x-8 gap-y-4">
+          <div role="group" aria-label="Période" className="flex flex-wrap gap-1 rounded-xl bg-sable p-1.5">
+            {PERIODES.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                aria-pressed={choix === p.id}
+                onClick={() => {
+                  setChoix(p.id);
+                  setMessage(null);
+                }}
+                className={`min-h-12 rounded-lg px-4 text-base font-semibold ${choix === p.id ? "bg-white text-marque-fonce shadow-sm" : "text-gris hover:text-encre"}`}
+              >
+                {p.libelle}
+              </button>
+            ))}
+          </div>
+          {choix === "jour" && <ChampDate libelle="Jour à afficher" valeur={jourChoisi} onChange={setJourChoisi} />}
         </div>
-        {choix === "jour" && <ChampDate libelle="Jour à afficher" valeur={jourChoisi} onChange={setJourChoisi} />}
-      </div>
+      )}
 
-      <h2 className="mb-4 text-2xl font-bold first-letter:uppercase">{titre}</h2>
+      {(voitArgent || voitDepenses) && <h2 className="mb-4 text-2xl font-bold first-letter:uppercase">{titre}</h2>}
 
       <div className="grid gap-6">
         <div ref={zoneMessages} className="grid scroll-mt-6 gap-4 empty:hidden">
@@ -195,6 +197,13 @@ export function Caisse() {
           {impression.document && <AvisDocument document={impression.document} />}
           {impression.erreur && <Alerte type="erreur">{impression.erreur}</Alerte>}
         </div>
+
+        {!voitArgent && (
+          <Alerte type="info" titre="Vous n'avez pas accès au montant de la caisse">
+            {peutImprimer && "Vous pouvez encaisser les paiements des clients depuis leur réservation. "}
+            Pour voir les totaux et les paiements, demandez cet accès à l'administrateur.
+          </Alerte>
+        )}
 
         {voitArgent && rapport && (
           <>

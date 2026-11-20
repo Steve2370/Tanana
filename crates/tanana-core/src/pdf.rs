@@ -9,7 +9,8 @@
 
 use krilla::Document;
 use krilla::color::rgb;
-use krilla::geom::{PathBuilder, Point, Rect};
+use krilla::geom::{PathBuilder, Point, Rect, Size, Transform};
+use krilla::image::Image;
 use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
@@ -18,7 +19,7 @@ use krilla::text::{Font, TextDirection};
 
 use crate::erreur::{Erreur, Resultat};
 use crate::francais::{date, date_longue, majuscule, montant, montant_en_lettres, pluriel, pourcentage};
-use crate::modeles::{CalculTaxe, ModePaiement, Taxe, TypeDocument, TypePaiement};
+use crate::modeles::{CalculTaxe, FormatLogo, ModePaiement, Taxe, TypeDocument, TypePaiement};
 use crate::services::documents::{ContenuDocument, LignePaiement};
 
 // ───────────────────────────── Polices et couleurs ─────────────────────────────
@@ -123,6 +124,13 @@ pub enum Op {
         couleur: Couleur,
         epaisseur: f32,
     },
+    /// Le logo de l'hôtel, dans un cadre de `l` × `h` (coin haut gauche en `x`, `y`).
+    Logo {
+        x: f32,
+        y: f32,
+        l: f32,
+        h: f32,
+    },
 }
 
 pub const PAGE_L: f32 = 595.28;
@@ -132,6 +140,10 @@ const DROITE: f32 = PAGE_L - MARGE;
 const LARGEUR_UTILE: f32 = PAGE_L - 2.0 * MARGE;
 /// En dessous, on change de page (le pied de page commence après).
 const BAS_CONTENU: f32 = 742.0;
+/// Place maximale du logo en haut à gauche de la première page.
+pub const LOGO_L_MAX: f32 = 110.0;
+pub const LOGO_H_MAX: f32 = 60.0;
+const LOGO_HAUT: f32 = 24.0;
 
 #[derive(Clone, Copy)]
 enum Alignement {
@@ -246,8 +258,29 @@ fn libelle_taxe(t: &Taxe, c: &ContenuDocument) -> String {
 }
 
 /// « du 13 au 14 novembre 2026 », « du 30 novembre au 2 décembre 2026 »…
+/// Période du document : celle de la chambre, ou du groupe (de la première arrivée au dernier départ).
 fn periode(c: &ContenuDocument) -> String {
-    let (a, d) = (c.sejour.arrivee, c.sejour.depart);
+    let a = c.sejours().iter().map(|s| s.arrivee).min().unwrap_or(c.sejour.arrivee);
+    let d = c.sejours().iter().map(|s| s.depart).max().unwrap_or(c.sejour.depart);
+    periode_de(a, d)
+}
+
+/// Vrai si toutes les chambres ont les mêmes dates.
+fn memes_dates(c: &ContenuDocument) -> bool {
+    c.sejours().windows(2).all(|w| w[0].arrivee == w[1].arrivee && w[0].depart == w[1].depart)
+}
+
+/// « Chambres 101, 102 et 103 »
+fn liste_chambres(c: &ContenuDocument) -> String {
+    let numeros: Vec<&str> = c.sejours().iter().map(|s| s.chambre_numero.as_str()).collect();
+    match numeros.as_slice() {
+        [] => String::new(),
+        [seule] => format!("chambre {seule}"),
+        [debut @ .., fin] => format!("chambres {} et {fin}", debut.join(", ")),
+    }
+}
+
+fn periode_de(a: chrono::NaiveDate, d: chrono::NaiveDate) -> String {
     use chrono::Datelike;
     if a.year() == d.year() && a.month() == d.month() {
         format!("du {} au {}", if a.day() == 1 { "1er".into() } else { a.day().to_string() }, date(d))
@@ -291,25 +324,33 @@ pub fn mise_en_page(c: &ContenuDocument, duplicata: bool) -> Vec<Vec<Op>> {
 /// En-tête complet (première page) ; renvoie la position sous le trait.
 fn entete(m: &mut Mise, c: &ContenuDocument, duplicata: bool) -> f32 {
     m.rect(0.0, 0.0, PAGE_L, 8.0, MARQUE);
-    // À gauche : l'hôtel
-    let largeur_hotel = 280.0;
+    // À gauche : le logo (s'il y en a un), puis l'hôtel
+    let (x_hotel, bas_logo) = match &c.hotel.logo {
+        Some(logo) => {
+            let (l, h) = taille_logo(logo.largeur, logo.hauteur);
+            m.ops().push(Op::Logo { x: MARGE, y: LOGO_HAUT, l, h });
+            (MARGE + l + 14.0, LOGO_HAUT + h)
+        }
+        None => (MARGE, 0.0),
+    };
+    let largeur_hotel = 280.0 - (x_hotel - MARGE).min(100.0);
     let nom = couper(&c.hotel.nom, Poids::Gras, 19.0, largeur_hotel);
     let mut y = 62.0;
     for l in &nom {
-        m.texte(MARGE, y, Poids::Gras, 19.0, MARQUE, Alignement::Gauche, l);
+        m.texte(x_hotel, y, Poids::Gras, 19.0, MARQUE, Alignement::Gauche, l);
         y += 22.0;
     }
     y -= 4.0;
     if let Some(a) = &c.hotel.adresse {
-        y += 13.0 * m.paragraphe(MARGE, y, largeur_hotel, Poids::Regulier, 9.5, 13.0, GRIS, a) as f32;
+        y += 13.0 * m.paragraphe(x_hotel, y, largeur_hotel, Poids::Regulier, 9.5, 13.0, GRIS, a) as f32;
     }
     let contact: Vec<String> = [c.hotel.telephone.as_ref().map(|t| format!("Tél. {t}")), c.hotel.email.clone()]
         .into_iter()
         .flatten()
         .collect();
     if !contact.is_empty() {
-        y +=
-            13.0 * m.paragraphe(MARGE, y, largeur_hotel, Poids::Regulier, 9.5, 13.0, GRIS, &contact.join(" · ")) as f32;
+        y += 13.0
+            * m.paragraphe(x_hotel, y, largeur_hotel, Poids::Regulier, 9.5, 13.0, GRIS, &contact.join(" · ")) as f32;
     }
 
     // À droite : le type de document, son numéro, sa date
@@ -334,9 +375,16 @@ fn entete(m: &mut Mise, c: &ContenuDocument, duplicata: bool) -> f32 {
         m.texte(DROITE, 138.0, Poids::Regulier, 8.5, GRIS, Alignement::Droite, "Copie d'un document déjà remis");
         y_droite = 138.0;
     }
-    let bas = y.max(y_droite) + 12.0;
+    let bas = y.max(y_droite).max(bas_logo) + 12.0;
     m.ligne(MARGE, bas, DROITE, bas, BORDURE, 1.0);
     bas
+}
+
+/// Taille du logo sur le document : il tient dans LOGO_L_MAX × LOGO_H_MAX, sans être déformé.
+pub fn taille_logo(largeur: u32, hauteur: u32) -> (f32, f32) {
+    let (l, h) = (largeur.max(1) as f32, hauteur.max(1) as f32);
+    let echelle = (LOGO_L_MAX / l).min(LOGO_H_MAX / h);
+    (l * echelle, h * echelle)
 }
 
 /// En-tête réduit des pages suivantes.
@@ -381,12 +429,32 @@ fn blocs_client_sejour(m: &mut Mise, c: &ContenuDocument, haut: f32) -> f32 {
     if let Some(e) = &c.client.email {
         client.push((Poids::Regulier, 9.5, e.clone()));
     }
-    let sejour = vec![
-        (Poids::Gras, 12.5, format!("Chambre {} · {}", c.sejour.chambre_numero, c.sejour.chambre_type)),
-        (Poids::Regulier, 9.5, format!("Arrivée : {}", date_longue(c.sejour.arrivee))),
-        (Poids::Regulier, 9.5, format!("Départ : {}", date_longue(c.sejour.depart))),
-        (Poids::Regulier, 9.5, pluriel(c.sejour.nuits, "nuit")),
-    ];
+    let sejour = if c.est_un_groupe() {
+        let mut v = vec![(
+            Poids::Gras,
+            12.5,
+            match &c.groupe {
+                Some(nom) => format!("{nom} · {}", pluriel(c.chambres.len() as i64, "chambre")),
+                None => format!("Groupe de {}", pluriel(c.chambres.len() as i64, "chambre")),
+            },
+        )];
+        v.push((Poids::Regulier, 9.5, majuscule(&liste_chambres(c))));
+        if memes_dates(c) {
+            v.push((Poids::Regulier, 9.5, format!("Arrivée : {}", date_longue(c.sejour.arrivee))));
+            v.push((Poids::Regulier, 9.5, format!("Départ : {}", date_longue(c.sejour.depart))));
+            v.push((Poids::Regulier, 9.5, format!("{} par chambre", pluriel(c.sejour.nuits, "nuit"))));
+        } else {
+            v.push((Poids::Regulier, 9.5, majuscule(&periode(c))));
+        }
+        v
+    } else {
+        vec![
+            (Poids::Gras, 12.5, format!("Chambre {} · {}", c.sejour.chambre_numero, c.sejour.chambre_type)),
+            (Poids::Regulier, 9.5, format!("Arrivée : {}", date_longue(c.sejour.arrivee))),
+            (Poids::Regulier, 9.5, format!("Départ : {}", date_longue(c.sejour.depart))),
+            (Poids::Regulier, 9.5, pluriel(c.sejour.nuits, "nuit")),
+        ]
+    };
     let lignes = |bloc: &[(Poids, f32, String)]| -> Vec<(Poids, f32, String)> {
         bloc.iter().flat_map(|(p, t, s)| couper(s, *p, *t, interieur).into_iter().map(move |l| (*p, *t, l))).collect()
     };
@@ -450,9 +518,10 @@ fn corps_recu(m: &mut Mise, c: &ContenuDocument) {
 
     // Le détail
     let objet = format!(
-        "{} pour la chambre {}, {}",
+        "{} pour {}{}, {}",
         if rembourse { "Remboursement" } else { libelle_type(p.type_paiement) },
-        c.sejour.chambre_numero,
+        if c.est_un_groupe() { "le groupe, " } else { "la " },
+        liste_chambres(c),
         periode(c)
     );
     let mut details = vec![
@@ -486,7 +555,7 @@ fn corps_recu(m: &mut Mise, c: &ContenuDocument) {
     m.ligne(x, m.y, DROITE, m.y, BORDURE, 1.0);
     m.y += 18.0;
     let (libelle, reste) = libelle_reste(c);
-    let mut lignes = vec![("Prix du séjour", fmt(c.sejour.prix_total), false)];
+    let mut lignes = vec![("Prix du séjour", fmt(c.prix_hebergement()), false)];
     let ajoutees = c.taxes.as_ref().map_or(0, |t| t.total_ajoutees);
     if ajoutees > 0 {
         lignes.push(("Taxes ajoutées", fmt(ajoutees), false));
@@ -562,24 +631,48 @@ fn corps_facture(m: &mut Mise, c: &ContenuDocument) {
             ("Montant", colonnes[3], Droite),
         ],
     );
-    let s = &c.sejour;
-    let prix_nuit = if s.nuits > 0 && s.prix_total % s.nuits == 0 { fmt(s.prix_total / s.nuits) } else { "—".into() };
     let comprises: Vec<String> =
         c.lignes_taxes().iter().filter(|l| l.taxe.comprise).map(|l| libelle_taxe(&l.taxe, c)).collect();
-    m.texte(
-        colonnes[0],
-        m.y + 20.0,
-        Poids::Demi,
-        10.5,
-        ENCRE,
-        Alignement::Gauche,
-        &format!("Hébergement · chambre {} ({})", s.chambre_numero, s.chambre_type),
-    );
-    m.texte(colonnes[0], m.y + 35.0, Poids::Regulier, 9.0, GRIS, Alignement::Gauche, &majuscule(&periode(c)));
-    m.texte(colonnes[1], m.y + 20.0, Poids::Regulier, 10.5, ENCRE, Alignement::Droite, &s.nuits.to_string());
-    m.texte(colonnes[2], m.y + 20.0, Poids::Regulier, 10.5, ENCRE, Alignement::Droite, &prix_nuit);
-    m.texte(colonnes[3], m.y + 20.0, Poids::Demi, 10.5, ENCRE, Alignement::Droite, &fmt(s.prix_total));
-    m.y += 46.0;
+    let titres_prestations = [
+        ("Désignation", colonnes[0], Gauche),
+        ("Nuits", colonnes[1], Droite),
+        ("Prix par nuit", colonnes[2], Droite),
+        ("Montant", colonnes[3], Droite),
+    ];
+    for (i, s) in c.sejours().iter().enumerate() {
+        if i > 0 {
+            if m.y + 46.0 > BAS_CONTENU {
+                nouvelle_page(m, c);
+                entete_tableau(m, titres_prestations);
+            } else {
+                m.ligne(MARGE, m.y, DROITE, m.y, BORDURE, 0.5);
+            }
+        }
+        let prix_nuit =
+            if s.nuits > 0 && s.prix_total % s.nuits == 0 { fmt(s.prix_total / s.nuits) } else { "—".into() };
+        m.texte(
+            colonnes[0],
+            m.y + 20.0,
+            Poids::Demi,
+            10.5,
+            ENCRE,
+            Alignement::Gauche,
+            &format!("Hébergement · chambre {} ({})", s.chambre_numero, s.chambre_type),
+        );
+        m.texte(
+            colonnes[0],
+            m.y + 35.0,
+            Poids::Regulier,
+            9.0,
+            GRIS,
+            Alignement::Gauche,
+            &majuscule(&periode_de(s.arrivee, s.depart)),
+        );
+        m.texte(colonnes[1], m.y + 20.0, Poids::Regulier, 10.5, ENCRE, Alignement::Droite, &s.nuits.to_string());
+        m.texte(colonnes[2], m.y + 20.0, Poids::Regulier, 10.5, ENCRE, Alignement::Droite, &prix_nuit);
+        m.texte(colonnes[3], m.y + 20.0, Poids::Demi, 10.5, ENCRE, Alignement::Droite, &fmt(s.prix_total));
+        m.y += 46.0;
+    }
     if !comprises.is_empty() {
         let texte = format!("Ce prix comprend : {}", comprises.join(", "));
         let n = m.paragraphe(colonnes[0], m.y + 3.0, 270.0, Poids::Regulier, 9.0, 12.0, GRIS, &texte);
@@ -595,16 +688,22 @@ fn corps_facture(m: &mut Mise, c: &ContenuDocument) {
         let t = &l.taxe;
         m.texte(colonnes[0], m.y + 20.0, Poids::Demi, 10.5, ENCRE, Alignement::Gauche, &t.libelle);
         let detail = match t.calcul {
+            // Dans un groupe, une taxe peut ne pas concerner toutes les chambres : pas de base affichée.
+            CalculTaxe::Pourcentage if c.est_un_groupe() => format!("{} du prix hors taxes", pourcentage(t.valeur)),
             CalculTaxe::Pourcentage => {
-                let ht = c.taxes.as_ref().map_or(s.prix_total, |d| d.hors_taxes);
+                let ht = c.taxes.as_ref().map_or(c.sejour.prix_total, |d| d.hors_taxes);
                 format!("{} du prix hors taxes ({})", pourcentage(t.valeur), fmt(ht))
             }
+            CalculTaxe::ParNuit if c.est_un_groupe() => "Par nuit et par chambre".to_string(),
             CalculTaxe::ParNuit => "Par nuit".to_string(),
+            CalculTaxe::ParSejour if c.est_un_groupe() => "Par chambre, pour le séjour".to_string(),
             CalculTaxe::ParSejour => "Pour le séjour".to_string(),
         };
         m.texte(colonnes[0], m.y + 33.0, Poids::Regulier, 9.0, GRIS, Alignement::Gauche, &detail);
-        if t.calcul == CalculTaxe::ParNuit {
-            m.texte(colonnes[1], m.y + 20.0, Poids::Regulier, 10.5, ENCRE, Alignement::Droite, &s.nuits.to_string());
+        // Nuits concernées : toutes celles des chambres qui ont cette taxe.
+        if t.calcul == CalculTaxe::ParNuit && t.valeur > 0 && l.montant % t.valeur == 0 {
+            let nuits = l.montant / t.valeur;
+            m.texte(colonnes[1], m.y + 20.0, Poids::Regulier, 10.5, ENCRE, Alignement::Droite, &nuits.to_string());
             m.texte(colonnes[2], m.y + 20.0, Poids::Regulier, 10.5, ENCRE, Alignement::Droite, &fmt(t.valeur));
         }
         m.texte(colonnes[3], m.y + 20.0, Poids::Demi, 10.5, ENCRE, Alignement::Droite, &fmt(l.montant));
@@ -733,8 +832,50 @@ fn remplissage(c: Couleur) -> Fill {
     Fill { paint: peinture(c), opacity: NormalizedF32::ONE, rule: Default::default() }
 }
 
-/// Produit le fichier PDF du document.
+/// L'image du logo, prête pour krilla.
+fn image_logo(format: FormatLogo, octets: &[u8]) -> Resultat<Image> {
+    let donnees: krilla::Data = octets.to_vec().into();
+    match format {
+        FormatLogo::Png => Image::from_png(donnees, true),
+        FormatLogo::Jpeg => Image::from_jpeg(donnees, true),
+    }
+    .map_err(|_| Erreur::Validation("cette image est illisible : choisissez un fichier PNG ou JPEG".into()))
+}
+
+/// Vérifie qu'une image s'ouvre et peut être mise dans un PDF ; renvoie sa taille en pixels.
+pub fn verifier_image(format: FormatLogo, octets: &[u8]) -> Resultat<(u32, u32)> {
+    let image = image_logo(format, octets)?;
+    let taille = image.size();
+    let mut doc = Document::new();
+    let reglages = PageSettings::from_wh(100.0, 100.0).ok_or_else(|| Erreur::Base("format de page".into()))?;
+    {
+        let mut page = doc.start_page_with(reglages);
+        let mut s = page.surface();
+        if let Some(t) = Size::from_wh(50.0, 50.0) {
+            s.draw_image(image, t);
+        }
+        s.finish();
+        page.finish();
+    }
+    doc.finish().map_err(|_| Erreur::Validation("cette image est illisible : choisissez un fichier PNG ou JPEG".into()))?;
+    if taille.0 == 0 || taille.1 == 0 {
+        return Err(Erreur::Validation("cette image est vide".into()));
+    }
+    Ok(taille)
+}
+
+/// Produit le fichier PDF du document, sans logo.
 pub fn rendre(c: &ContenuDocument, duplicata: bool) -> Resultat<Vec<u8>> {
+    rendre_avec_logo(c, duplicata, None)
+}
+
+/// Produit le fichier PDF du document. `logo` : l'image désignée par `c.hotel.logo`
+/// (sans elle, le document est produit sans logo).
+pub fn rendre_avec_logo(c: &ContenuDocument, duplicata: bool, logo: Option<&[u8]>) -> Resultat<Vec<u8>> {
+    let image = match (&c.hotel.logo, logo) {
+        (Some(l), Some(octets)) => Some(image_logo(l.format, octets)?),
+        _ => None,
+    };
     let polices = [
         (Poids::Regulier, Font::new(LEXEND_REGULIER.into(), 0)),
         (Poids::Demi, Font::new(LEXEND_DEMI.into(), 0)),
@@ -788,6 +929,13 @@ pub fn rendre(c: &ContenuDocument, duplicata: bool) -> Resultat<Vec<u8>> {
                         s.set_fill(None);
                         s.set_stroke(Some(Stroke { paint: peinture(couleur), width: epaisseur, ..Default::default() }));
                         s.draw_path(&chemin);
+                    }
+                }
+                Op::Logo { x, y, l, h } => {
+                    if let (Some(image), Some(taille)) = (&image, Size::from_wh(l, h)) {
+                        s.push_transform(&Transform::from_translate(x, y));
+                        s.draw_image(image.clone(), taille);
+                        s.pop();
                     }
                 }
                 Op::Ligne { x1, y1, x2, y2, couleur, epaisseur } => {

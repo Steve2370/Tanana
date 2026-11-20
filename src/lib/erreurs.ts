@@ -78,7 +78,11 @@ export function messageErreur(e: Erreur): string {
     case "RELAIS_INJOIGNABLE":
       return "Impossible de joindre le serveur de consultation à distance. Vérifiez la connexion Internet et l'adresse du serveur, puis réessayez.";
     case "RELAIS_REFUSE":
-      return `Le serveur de consultation à distance refuse la demande (${e.details}). Vérifiez l'identifiant de l'hôtel et le code d'invitation.`;
+      // À l'activation, l'hôtel n'a pas encore d'identifiant : seul le code d'invitation peut être en cause.
+      if (e.details.includes("invitation")) {
+        return "Le code d'invitation n'est pas accepté par le serveur. Vérifiez-le (il vous a été donné avec Tanana), puis réessayez.";
+      }
+      return `Le serveur de consultation à distance refuse la demande (${e.details}). Vérifiez l'adresse du serveur, l'identifiant de l'hôtel et la clé.`;
     case "HOTEL_INCONNU_DU_RELAIS":
       return "Le serveur ne connaît pas cet hôtel. Vérifiez l'identifiant de l'hôtel. Si la consultation à distance a été arrêtée à l'hôtel, il faut la réactiver là-bas et noter la nouvelle clé.";
     case "CLE_DISTANCE_INCORRECTE":

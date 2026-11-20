@@ -6,6 +6,7 @@ pub mod argent;
 pub mod chambres;
 pub mod clients;
 pub mod documents;
+pub mod logo;
 pub mod reservations;
 pub mod systeme;
 pub mod taxes;

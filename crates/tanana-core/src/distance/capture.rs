@@ -10,7 +10,7 @@ use rusqlite::Connection;
 use crate::erreur::Resultat;
 
 /// Tables envoyées, dans un ordre qui respecte les clés étrangères.
-pub const TABLES_ENVOYEES: [&str; 16] = [
+pub const TABLES_ENVOYEES: [&str; 18] = [
     "parametres",
     "roles",
     "permissions",
@@ -20,10 +20,12 @@ pub const TABLES_ENVOYEES: [&str; 16] = [
     "types_chambre",
     "chambres",
     "clients",
+    "groupes",
     "reservations",
     "paiements",
     "depenses",
     "journal_audit",
+    "logos",
     "documents",
     "taxes_hotel",
     "taxes_reservation",

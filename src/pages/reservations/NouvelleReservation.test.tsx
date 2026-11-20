@@ -46,9 +46,9 @@ describe("Nouvelle réservation", () => {
     );
 
     // 2. Chambre : seulement les chambres libres
-    expect(await screen.findByText("2 chambres libres à ces dates :")).toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: /Chambre 103/ })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("radio", { name: /Chambre 101/ }));
+    expect(await screen.findByText("2 chambres libres à ces dates.")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Chambre 103/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Chambre 101/ }));
 
     // 3. Client
     await choisirClient();
@@ -73,7 +73,7 @@ describe("Nouvelle réservation", () => {
     const appels = simuler();
     rendreConnecte(<Reservations />);
     await userEvent.click(await screen.findByRole("button", { name: `Réserver la chambre 102 pour la nuit du ${formatJourMoyen(j(3))}` }));
-    expect(await screen.findByRole("radio", { name: /Chambre 102/ })).toBeChecked();
+    expect(await screen.findByRole("checkbox", { name: /Chambre 102/ })).toBeChecked();
     expect(appels.filter((a) => a.commande === "chambres_disponibles").at(-1)?.args).toMatchObject({ arrivee: j(3), depart: j(4) });
     expect(screen.getByText(formatJourLong(j(4)))).toBeInTheDocument();
   });
@@ -81,10 +81,10 @@ describe("Nouvelle réservation", () => {
   it("dit clairement ce qui manque, sans appeler Rust", async () => {
     const appels = simuler();
     await ouvrirFormulaire();
-    await screen.findByRole("radio", { name: /Chambre 101/ });
+    await screen.findByRole("checkbox", { name: /Chambre 101/ });
     await userEvent.click(screen.getByRole("button", { name: "Enregistrer la réservation" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Choisissez une chambre (étape 2).");
-    await userEvent.click(screen.getByRole("radio", { name: /Chambre 101/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /Chambre 101/ }));
     await userEvent.click(screen.getByRole("button", { name: "Enregistrer la réservation" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Choisissez le client (étape 3).");
     expect(appels.some((a) => a.commande === "creer_reservation")).toBe(false);
@@ -97,7 +97,7 @@ describe("Nouvelle réservation", () => {
     let libres = [CHAMBRES[0], CHAMBRES[1]];
     simuler({ chambres_disponibles: () => libres });
     await ouvrirFormulaire();
-    await userEvent.click(await screen.findByRole("radio", { name: /Chambre 101/ }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /Chambre 101/ }));
     libres = [CHAMBRES[1]];
     await userEvent.click(screen.getByRole("button", { name: "Une nuit de plus" }));
     expect(await screen.findByText(/La chambre choisie n'est pas libre à ces dates/)).toBeInTheDocument();
@@ -178,7 +178,7 @@ describe("Nouvelle réservation", () => {
   it("accepte un prix convenu différent et une remarque", async () => {
     const appels = simuler();
     await ouvrirFormulaire();
-    await userEvent.click(await screen.findByRole("radio", { name: /Chambre 101/ }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /Chambre 101/ }));
     await choisirClient();
     await userEvent.click(screen.getByLabelText(/Appliquer un autre prix/));
     await userEvent.type(screen.getByLabelText("Prix total convenu"), "beaucoup");
@@ -200,7 +200,7 @@ describe("Nouvelle réservation", () => {
   it("affiche le refus de Rust si la chambre vient d'être prise par un autre poste", async () => {
     simuler({ creer_reservation: () => erreurRust({ code: "CHAMBRE_DEJA_RESERVEE", details: { reservation_en_conflit: "r9" } }) });
     await ouvrirFormulaire();
-    await userEvent.click(await screen.findByRole("radio", { name: /Chambre 101/ }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /Chambre 101/ }));
     await choisirClient();
     await userEvent.click(screen.getByRole("button", { name: "Enregistrer la réservation" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Cette chambre est déjà réservée sur une partie de ces dates");
@@ -224,7 +224,7 @@ describe("Nouvelle réservation : taxes de l'hôtel", () => {
       calculer_taxes: ({ prix, nuits, taxes }) => detailSimule(prix as number, nuits as number, taxes as Taxe[]),
     });
     await ouvrirFormulaire();
-    await userEvent.click(await screen.findByRole("radio", { name: /Chambre 101/ }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /Chambre 101/ }));
     const liste = await screen.findByRole("list", { name: "Taxes du séjour" });
     expect(liste).toHaveTextContent(/Taxe de séjour \(2\s000\sFCFA par nuit\)/);
     expect(liste.parentElement).toHaveTextContent(/Total à payer27\s000\sFCFA/); // 1 nuit à 25 000 + 2 000
@@ -240,7 +240,7 @@ describe("Nouvelle réservation : taxes de l'hôtel", () => {
   it("sans taxe réglée, rien de plus ne s'affiche", async () => {
     simuler({ taxes_hotel: () => [] });
     await ouvrirFormulaire();
-    await userEvent.click(await screen.findByRole("radio", { name: /Chambre 101/ }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /Chambre 101/ }));
     expect(screen.queryByText("Taxes de l'hôtel")).not.toBeInTheDocument();
   });
 });

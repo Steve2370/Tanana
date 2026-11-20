@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Banknote, CalendarX, DoorClosed, DoorOpen, FileText, Pencil, Percent, Printer, Undo2 } from "lucide-react";
+import { ArrowLeft, Banknote, CalendarX, DoorClosed, DoorOpen, FileText, Pencil, Percent, Plus, Printer, Undo2 } from "lucide-react";
 
 import type { Chambre } from "../../bindings/Chambre";
 import type { DetailTaxes } from "../../bindings/DetailTaxes";
 import type { DocumentEmis } from "../../bindings/DocumentEmis";
+import type { Groupe } from "../../bindings/Groupe";
 import type { ModePaiement } from "../../bindings/ModePaiement";
 import type { Paiement } from "../../bindings/Paiement";
 import type { Reservation } from "../../bindings/Reservation";
@@ -20,7 +21,17 @@ import { formatHorodatage, formatMontant, lireMontant, saisieMontant, type Devis
 import { LIBELLE_MODE, LIBELLE_STATUT_RESERVATION, LIBELLE_TYPE_PAIEMENT, MODES_PAIEMENT } from "../../lib/libelles";
 import { useDevise, useSession } from "../../lib/session";
 
-type Panneau = null | "encaisser" | "rembourser" | "modifier" | "annuler" | "taxes";
+type Panneau = null | "encaisser" | "rembourser" | "modifier" | "annuler" | "taxes" | "ajouter";
+
+/** Le compte qui compte : celui de la chambre, ou celui du groupe entier. */
+interface Compte {
+  total: number;
+  paye: number;
+  solde: number;
+}
+
+const compteDe = (r: Reservation, g: Groupe | null): Compte =>
+  g ? { total: g.total_a_payer, paye: g.total_encaisse, solde: g.solde } : { total: r.total_a_payer, paye: r.total_encaisse, solde: r.solde };
 
 const TON_STATUT: Record<StatutReservation, "neutre" | "succes" | "alerte" | "danger"> = {
   confirmee: "succes",
@@ -34,16 +45,20 @@ export function FicheReservation({
   messageInitial,
   libelleRetour = "Retour au tableau",
   onRetour,
+  onOuvrir,
 }: {
   id: string;
   messageInitial?: string;
   libelleRetour?: string;
   onRetour: () => void;
+  /** Ouvre la fiche d'une autre chambre du même groupe. */
+  onOuvrir?: (id: string) => void;
 }) {
   const { peut } = useSession();
   const devise = useDevise();
   const { confirmer, fenetre } = useConfirmation();
   const [r, setR] = useState<Reservation | null>(null);
+  const [groupe, setGroupe] = useState<Groupe | null>(null);
   const [paiements, setPaiements] = useState<Paiement[]>([]);
   const [panneau, setPanneau] = useState<Panneau>(null);
   const [message, setMessage] = useState<string | null>(messageInitial ?? null);
@@ -67,9 +82,11 @@ export function FicheReservation({
 
   const charger = useCallback(async () => {
     const [reservation, p] = await Promise.all([api.obtenirReservation(id), api.paiementsReservation(id)]);
+    const g = reservation.groupe_id ? await api.obtenirGroupe(reservation.groupe_id) : null;
     setR(reservation);
+    setGroupe(g);
     setPaiements(p);
-    return reservation;
+    return { reservation, compte: compteDe(reservation, g) };
   }, [id]);
 
   useEffect(() => {
@@ -84,7 +101,10 @@ export function FicheReservation({
   }, [message, erreur, avisImpression]);
 
   /** Fait l'action, recharge la fiche, puis affiche le message de réussite. */
-  const executer = async <T,>(action: () => Promise<T>, succes: (apres: Reservation) => string): Promise<T | null> => {
+  const executer = async <T,>(
+    action: () => Promise<T>,
+    succes: (apres: Reservation, compte: Compte) => string,
+  ): Promise<T | null> => {
     setEnCours(true);
     setErreur(null);
     setMessage(null);
@@ -94,8 +114,9 @@ export function FicheReservation({
       const resultat = await action();
       const apres = await charger();
       chargerTaxes();
+      chargerDocuments();
       setPanneau(null);
-      setMessage(succes(apres));
+      setMessage(succes(apres.reservation, apres.compte));
       return resultat;
     } catch (e) {
       setErreur(versErreur(e).message);
@@ -129,6 +150,10 @@ export function FicheReservation({
   }
 
   const m = (montant: number) => formatMontant(montant, devise);
+  const compte = compteDe(r, groupe);
+  // Dans un groupe, l'argent va sur une chambre encore active (n'importe laquelle : le compte est commun).
+  const chambreActive = (x: Reservation) => x.statut === "confirmee" || x.statut === "arrivee";
+  const porteur = chambreActive(r) ? r : (groupe?.reservations.find(chambreActive) ?? r);
   const ouvrir = (p: Panneau) => {
     setPanneau(p);
     setErreur(null);
@@ -167,15 +192,15 @@ export function FicheReservation({
     const paiement = await executer(
       () =>
         api.encaisser({
-          reservation_id: r.id,
+          reservation_id: porteur.id,
           montant,
-          type_paiement: montant === r.solde ? "solde" : "acompte",
+          type_paiement: montant === compte.solde ? "solde" : "acompte",
           mode,
           note: note.trim() || null,
         }),
-      (apres) =>
+      (_, apres) =>
         apres.solde > 0
-          ? `Paiement de ${m(montant)} enregistré. Il reste ${m(apres.solde)} à payer.`
+          ? `Paiement de ${m(montant)} enregistré. Il reste ${m(apres.solde)} à payer${groupe ? " pour le groupe" : ""}.`
           : `Paiement de ${m(montant)} enregistré. Tout est payé.`,
     );
     if (paiement && peut("paiement.encaisser")) setRecuPropose(paiement.id);
@@ -189,15 +214,19 @@ export function FicheReservation({
       danger: true,
     });
     if (!ok) return;
-    const paiement = await executer(() => api.rembourser(r.id, montant, mode, motif), () => `Remboursement de ${m(montant)} enregistré.`);
+    const paiement = await executer(
+      () => api.rembourser(porteur.id, montant, mode, motif),
+      () => `Remboursement de ${m(montant)} enregistré.`,
+    );
     if (paiement && peut("paiement.encaisser")) setRecuPropose(paiement.id);
   };
 
   const annuler = async (motif: string) => {
     const ok = await confirmer({
       titre: `Annuler la réservation de ${r.client_nom} ?`,
-      message:
-        r.total_encaisse > 0
+      message: groupe
+        ? `La chambre ${r.chambre_numero} sera libérée et retirée de la facture du groupe. L'argent déjà payé reste sur le compte du groupe.`
+        : r.total_encaisse > 0
           ? `La chambre ${r.chambre_numero} sera libérée. Attention : les ${m(r.total_encaisse)} déjà payés ne sont pas rendus automatiquement.`
           : `La chambre ${r.chambre_numero} sera libérée. Cette action ne peut pas être défaite.`,
       libelleConfirmer: "Oui, annuler la réservation",
@@ -206,10 +235,14 @@ export function FicheReservation({
     if (ok)
       await executer(
         () => api.annulerReservation(r.id, motif),
-        (apres) =>
-          apres.total_encaisse > 0
-            ? `Réservation annulée. Le client avait payé ${m(apres.total_encaisse)} : utilisez « Rembourser » si vous devez lui rendre.`
-            : "Réservation annulée. La chambre est libre.",
+        (apres, c) =>
+          groupe
+            ? c.solde < 0
+              ? `La chambre ${apres.chambre_numero} est annulée. Le groupe a trop payé ${m(-c.solde)} : utilisez « Rembourser » si vous devez lui rendre.`
+              : `La chambre ${apres.chambre_numero} est annulée. Le groupe doit maintenant ${m(c.total)} en tout.`
+            : apres.total_encaisse > 0
+              ? `Réservation annulée. Le client avait payé ${m(apres.total_encaisse)} : utilisez « Rembourser » si vous devez lui rendre.`
+              : "Réservation annulée. La chambre est libre.",
       );
   };
 
@@ -232,20 +265,24 @@ export function FicheReservation({
     }
     await executer(
       () => api.modifierTaxesReservation(r.id, nouvelles),
-      (apres) =>
-        `Les taxes sont enregistrées. Le client doit ${m(apres.total_a_payer)} en tout` +
-        (apres.solde > 0 ? `, il reste ${m(apres.solde)} à payer.` : "."),
+      (apres, c) =>
+        groupe
+          ? `Les taxes de la chambre ${apres.chambre_numero} sont enregistrées. Le groupe doit ${m(c.total)} en tout` +
+            (c.solde > 0 ? `, il reste ${m(c.solde)} à payer.` : ".")
+          : `Les taxes sont enregistrées. Le client doit ${m(apres.total_a_payer)} en tout` +
+            (apres.solde > 0 ? `, il reste ${m(apres.solde)} à payer.` : "."),
     );
   };
 
-  const active = r.statut === "confirmee" || r.statut === "arrivee";
-  const peutEncaisser = active && r.solde > 0 && peut("paiement.encaisser");
-  const peutRembourser = r.total_encaisse > 0 && peut("paiement.rembourser");
+  const active = chambreActive(r);
+  const peutEncaisser = chambreActive(porteur) && compte.solde > 0 && peut("paiement.encaisser");
+  const peutRembourser = compte.paye > 0 && peut("paiement.rembourser");
+  const groupeActif = groupe !== null && groupe.reservations.some(chambreActive);
   // Remettre un reçu ou une facture va avec le droit d'encaisser.
   const peutImprimer = peut("paiement.encaisser");
   const peutChangerTaxes = r.statut !== "annulee" && peut("reservation.modifier");
   const avecTaxes = (taxes?.lignes.length ?? 0) > 0;
-  const cartesSecondaires = panneau !== "encaisser" && panneau !== "rembourser" && panneau !== "taxes";
+  const cartesSecondaires = panneau !== "encaisser" && panneau !== "rembourser" && panneau !== "taxes" && panneau !== "ajouter";
   const remplacees = new Set(documents.map((d) => d.remplace_numero).filter(Boolean));
 
   return (
@@ -259,6 +296,12 @@ export function FicheReservation({
             Chambre <strong className="text-encre">{r.chambre_numero}</strong> · {formatSejour(r.date_arrivee, r.date_depart)} ·{" "}
             {pluriel(r.nuits, "nuit")}
           </p>
+          {groupe && (
+            <p className="mt-1 text-lg font-semibold text-marque">
+              {groupe.nom ? `Groupe « ${groupe.nom} »` : "Réservation de groupe"} ·{" "}
+              {pluriel(groupe.reservations.filter((x) => x.statut !== "annulee").length, "chambre")}
+            </p>
+          )}
         </div>
         <span className="text-lg">
           <Pastille ton={TON_STATUT[r.statut]}>{LIBELLE_STATUT_RESERVATION[r.statut]}</Pastille>
@@ -286,23 +329,63 @@ export function FicheReservation({
         </div>
         {r.notes && <Alerte type="info" titre="Remarque">{r.notes}</Alerte>}
 
-        <Carte titre="Paiement">
+        {groupe && panneau !== "ajouter" && (
+          <CarteGroupe
+            groupe={groupe}
+            courante={r.id}
+            devise={devise}
+            onOuvrir={onOuvrir}
+            onAjouter={groupeActif && peut("reservation.creer") && panneau === null ? () => ouvrir("ajouter") : undefined}
+          />
+        )}
+        {groupe && panneau === "ajouter" && (
+          <AjoutAuGroupe
+            groupe={groupe}
+            devise={devise}
+            enCours={enCours}
+            onFermer={() => ouvrir(null)}
+            onValider={async (chambre, prix) => {
+              const ok = await confirmer({
+                titre: `Ajouter la chambre ${chambre.numero} au groupe ?`,
+                message: `Aux mêmes dates que le groupe. Le groupe devra ${m(compte.total + (prix ?? 0))} en tout, hors taxes éventuelles.`,
+                libelleConfirmer: "Oui, ajouter la chambre",
+              });
+              if (ok)
+                await executer(
+                  () => api.ajouterAuGroupe(groupe.id, chambre.id, prix),
+                  (_, c) => `La chambre ${chambre.numero} est ajoutée au groupe. Le groupe doit ${m(c.total)} en tout.`,
+                );
+            }}
+          />
+        )}
+
+        <Carte titre={groupe ? "Paiement du groupe" : "Paiement"}>
+          {groupe && (
+            <p className="mb-4 text-base text-gris">
+              Un seul compte pour toutes les chambres du groupe : un paiement fait depuis n'importe quelle chambre compte pour tout le
+              groupe.
+            </p>
+          )}
           <div className="grid grid-cols-3 gap-4">
-            {r.taxes_ajoutees > 0 ? (
+            {groupe ? (
+              <Chiffre libelle="Total du groupe" detail={pluriel(groupe.reservations.filter((x) => x.statut !== "annulee").length, "chambre")}>
+                {m(compte.total)}
+              </Chiffre>
+            ) : r.taxes_ajoutees > 0 ? (
               <Chiffre libelle="Total à payer" detail={`Chambre ${m(r.prix_total)} + taxes ${m(r.taxes_ajoutees)}`}>
                 {m(r.total_a_payer)}
               </Chiffre>
             ) : (
               <Chiffre libelle="Prix du séjour">{m(r.prix_total)}</Chiffre>
             )}
-            <Chiffre libelle="Déjà payé">{m(r.total_encaisse)}</Chiffre>
-            {r.solde > 0 ? (
+            <Chiffre libelle="Déjà payé">{m(compte.paye)}</Chiffre>
+            {compte.solde > 0 ? (
               <Chiffre libelle="Reste à payer" ton="orange">
-                {m(r.solde)}
+                {m(compte.solde)}
               </Chiffre>
-            ) : r.solde < 0 ? (
+            ) : compte.solde < 0 ? (
               <Chiffre libelle="Trop payé, à rendre" ton="danger">
-                {m(-r.solde)}
+                {m(-compte.solde)}
               </Chiffre>
             ) : (
               <Chiffre libelle="Reste à payer" ton="succes">
@@ -314,7 +397,7 @@ export function FicheReservation({
           {panneau !== "taxes" && (avecTaxes || peutChangerTaxes) && (
             <div className="mt-5 rounded-xl border-2 border-trait px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-lg font-bold">Taxes</p>
+                <p className="text-lg font-bold">{groupe ? `Taxes de la chambre ${r.chambre_numero}` : "Taxes"}</p>
                 {peutChangerTaxes && panneau === null && (
                   <Bouton variante="secondaire" icone={Percent} onClick={() => ouvrir("taxes")}>
                     Modifier les taxes
@@ -396,10 +479,10 @@ export function FicheReservation({
           )}
           {panneau === "encaisser" && (
             <FormulaireArgent
-              titre="Encaisser un paiement"
-              montantPropose={r.solde}
-              plafond={r.solde}
-              messagePlafond={`Le client ne doit plus que ${m(r.solde)}. Vous ne pouvez pas encaisser plus.`}
+              titre={groupe ? "Encaisser un paiement pour le groupe" : "Encaisser un paiement"}
+              montantPropose={compte.solde}
+              plafond={compte.solde}
+              messagePlafond={`${groupe ? "Le groupe" : "Le client"} ne doit plus que ${m(compte.solde)}. Vous ne pouvez pas encaisser plus.`}
               libelleTexte="Remarque"
               texteObligatoire={false}
               libelleValider="Encaisser"
@@ -412,9 +495,9 @@ export function FicheReservation({
           {panneau === "rembourser" && (
             <FormulaireArgent
               titre="Rembourser le client"
-              montantPropose={r.solde < 0 ? -r.solde : r.total_encaisse}
-              plafond={r.total_encaisse}
-              messagePlafond={`Le client a payé ${m(r.total_encaisse)} en tout. Vous ne pouvez pas rendre plus.`}
+              montantPropose={compte.solde < 0 ? -compte.solde : compte.paye}
+              plafond={compte.paye}
+              messagePlafond={`${groupe ? "Le groupe" : "Le client"} a payé ${m(compte.paye)} en tout. Vous ne pouvez pas rendre plus.`}
               libelleTexte="Raison du remboursement"
               texteObligatoire
               libelleValider="Rembourser"
@@ -428,17 +511,20 @@ export function FicheReservation({
 
         {cartesSecondaires && (peutImprimer || documents.length > 0) && (
           <Carte titre="Reçus et factures">
-            {r.statut !== "annulee" && peutImprimer && avecTaxes && (
+            {groupe && (
+              <p className="mb-3 text-gris">Une seule facture pour tout le groupe : elle reprend toutes ses chambres non annulées.</p>
+            )}
+            {!groupe && r.statut !== "annulee" && peutImprimer && avecTaxes && (
               <p className="mb-3 text-gris">La facture reprend les taxes indiquées dans « Paiement », plus haut.</p>
             )}
-            {r.statut !== "annulee" && peutImprimer && (
+            {(groupe ? groupe.reservations.some((x) => x.statut !== "annulee") : r.statut !== "annulee") && peutImprimer && (
               <Bouton
                 icone={FileText}
                 enCours={impression.enCours === `facture-${r.id}`}
                 onClick={() => void imprimer(() => impression.imprimerFacture(r.id))}
                 className="mb-4"
               >
-                Imprimer la facture
+                {groupe ? "Imprimer la facture du groupe" : "Imprimer la facture"}
               </Bouton>
             )}
             {documents.length === 0 ? (
@@ -471,9 +557,9 @@ export function FicheReservation({
 
             {active && panneau !== "modifier" && panneau !== "annuler" && (
               <div className="grid gap-4">
-                {r.statut === "arrivee" && r.solde > 0 && peut("sejour.gerer") && (
+                {r.statut === "arrivee" && compte.solde > 0 && peut("sejour.gerer") && (
                   <Alerte type="attention">
-                    Avant d'enregistrer le départ, encaissez le reste à payer ({m(r.solde)}).
+                    Avant d'enregistrer le départ, encaissez le reste à payer{groupe ? " du groupe" : ""} ({m(compte.solde)}).
                   </Alerte>
                 )}
                 <div className="flex flex-wrap gap-3">
@@ -483,7 +569,7 @@ export function FicheReservation({
                     </Bouton>
                   )}
                   {r.statut === "arrivee" && peut("sejour.gerer") && (
-                    <Bouton icone={DoorClosed} onClick={() => void depart()} disabled={r.solde > 0} enCours={enCours} grand>
+                    <Bouton icone={DoorClosed} onClick={() => void depart()} disabled={compte.solde > 0} enCours={enCours} grand>
                       Le client est parti
                     </Bouton>
                   )}
@@ -522,6 +608,156 @@ export function FicheReservation({
         )}
       </div>
     </>
+  );
+}
+
+/** Les chambres du groupe, avec leur état ; un clic ouvre la fiche d'une autre chambre. */
+function CarteGroupe({
+  groupe,
+  courante,
+  devise,
+  onOuvrir,
+  onAjouter,
+}: {
+  groupe: Groupe;
+  courante: string;
+  devise: Devise;
+  onOuvrir?: (id: string) => void;
+  onAjouter?: () => void;
+}) {
+  return (
+    <Carte
+      titre={groupe.nom ? `Groupe « ${groupe.nom} »` : "Chambres du groupe"}
+      actions={
+        onAjouter && (
+          <Bouton variante="secondaire" icone={Plus} onClick={onAjouter}>
+            Ajouter une chambre
+          </Bouton>
+        )
+      }
+    >
+      <ul aria-label="Chambres du groupe" className="divide-y divide-trait border-y border-trait">
+        {groupe.reservations.map((x) => (
+          <li key={x.id} className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 py-2">
+            <span className={x.statut === "annulee" ? "text-gris line-through" : ""}>
+              <span className="text-lg font-bold">Chambre {x.chambre_numero}</span>
+              <span className="text-gris">
+                {" "}
+                · {formatSejour(x.date_arrivee, x.date_depart)} · {formatMontant(x.total_a_payer, devise)}
+              </span>
+            </span>
+            <span className="flex items-center gap-3">
+              <Pastille ton={TON_STATUT[x.statut]}>{LIBELLE_STATUT_RESERVATION[x.statut]}</Pastille>
+              {x.id === courante ? (
+                <span className="text-base font-semibold text-gris">(cette fiche)</span>
+              ) : (
+                onOuvrir && (
+                  <Bouton variante="secondaire" onClick={() => onOuvrir(x.id)} aria-label={`Ouvrir la chambre ${x.chambre_numero}`}>
+                    Ouvrir
+                  </Bouton>
+                )
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Carte>
+  );
+}
+
+/** Ajouter une chambre libre au groupe, aux dates du groupe. */
+function AjoutAuGroupe({
+  groupe,
+  devise,
+  enCours,
+  onValider,
+  onFermer,
+}: {
+  groupe: Groupe;
+  devise: Devise;
+  enCours: boolean;
+  onValider: (chambre: Chambre, prix: number | null) => void | Promise<void>;
+  onFermer: () => void;
+}) {
+  const modele = groupe.reservations.find((x) => x.statut !== "annulee") ?? groupe.reservations[0];
+  const [libres, setLibres] = useState<Chambre[] | null>(null);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [choix, setChoix] = useState<string | null>(null);
+  const [autrePrix, setAutrePrix] = useState(false);
+  const [prixSaisi, setPrixSaisi] = useState("");
+  useEffect(() => {
+    if (!modele) return;
+    let annule = false;
+    api.chambresDisponibles(modele.date_arrivee, modele.date_depart).then(
+      (c) => !annule && setLibres(c),
+      (e) => !annule && setErreur(versErreur(e).message),
+    );
+    return () => {
+      annule = true;
+    };
+  }, [modele]);
+  if (!modele) return null;
+  const chambre = libres?.find((c) => c.id === choix) ?? null;
+  const valider = () => {
+    if (!chambre) return setErreur("Choisissez la chambre à ajouter.");
+    let prix: number | null = null;
+    if (autrePrix) {
+      prix = lireMontant(prixSaisi, devise.decimales);
+      if (prix === null) return setErreur("Le prix n'est pas lisible. Écrivez seulement des chiffres, par exemple 40000.");
+    }
+    setErreur(null);
+    void onValider(chambre, prix ?? chambre.prix_nuit_defaut * modele.nuits);
+  };
+  return (
+    <Carte titre="Ajouter une chambre au groupe">
+      <div className="grid gap-4">
+        <p className="text-lg">
+          Aux dates du groupe : <strong>{formatSejour(modele.date_arrivee, modele.date_depart)}</strong> ({pluriel(modele.nuits, "nuit")}).
+        </p>
+        {libres?.length === 0 && <Alerte type="attention">Aucune autre chambre n'est libre à ces dates.</Alerte>}
+        {libres && libres.length > 0 && (
+          <div role="radiogroup" aria-label="Chambre à ajouter" className="grid grid-cols-2 gap-3">
+            {libres.map((c) => (
+              <label
+                key={c.id}
+                className="flex min-h-16 cursor-pointer items-center gap-3 rounded-xl border-2 border-trait px-4 py-2 has-[:checked]:border-marque has-[:checked]:bg-marque-clair hover:border-marque/40"
+              >
+                <input type="radio" name="chambre-ajout" className="size-5 accent-marque" checked={choix === c.id} onChange={() => setChoix(c.id)} />
+                <span>
+                  <span className="block text-lg font-bold">Chambre {c.numero}</span>
+                  <span className="block text-gris">
+                    {c.type_nom} · {formatMontant(c.prix_nuit_defaut * modele.nuits, devise)} pour le séjour
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+        <label className="flex min-h-12 cursor-pointer items-center gap-3 font-semibold">
+          <input type="checkbox" className="size-5 accent-marque" checked={autrePrix} onChange={(e) => setAutrePrix(e.target.checked)} />
+          Appliquer un autre prix (prix convenu avec le client)
+        </label>
+        {autrePrix && (
+          <Champ
+            className="max-w-sm"
+            libelle="Prix convenu pour cette chambre"
+            value={prixSaisi}
+            onChange={(e) => setPrixSaisi(e.target.value)}
+            inputMode="decimal"
+            aide={`Pour tout le séjour, en ${devise.code}.`}
+          />
+        )}
+        {erreur && <Alerte type="erreur">{erreur}</Alerte>}
+        <div className="flex flex-wrap justify-end gap-3">
+          <Bouton variante="secondaire" onClick={onFermer} disabled={enCours}>
+            Fermer
+          </Bouton>
+          <Bouton icone={Plus} enCours={enCours} onClick={valider}>
+            Ajouter la chambre
+          </Bouton>
+        </div>
+      </div>
+    </Carte>
   );
 }
 

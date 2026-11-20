@@ -215,6 +215,24 @@ describe("Clients : fiche", () => {
     expect(sejours[2]).not.toHaveTextContent("Reste");
   });
 
+  it("un groupe ne compte qu'une fois dans le reste à payer, avec le reste du groupe", async () => {
+    simuler({
+      reservations_du_client: () => [
+        resa({ id: "g-a", groupe_id: "g1", total_encaisse: 100_000, solde: -25_000, solde_groupe: 50_000 }),
+        resa({ id: "g-b", chambre_numero: "102", groupe_id: "g1", total_encaisse: 0, solde: 75_000, solde_groupe: 50_000 }),
+        resa({ id: "seule", chambre_numero: "103", total_encaisse: 0, solde: 20_000 }),
+      ],
+    });
+    rendreConnecte(<Clients />);
+    await ouvrirFiche(/Mbarga Aline/);
+    const resume = await screen.findByRole("group", { name: "Résumé des séjours" });
+    // 50 000 pour le groupe + 20 000 pour la chambre seule (et pas 75 000 + 20 000)
+    expect(within(resume).getByText("Reste à payer").nextSibling).toHaveTextContent("70 000 FCFA");
+    const sejours = within(screen.getByRole("list", { name: "Séjours du client" })).getAllByRole("button");
+    expect(sejours.filter((b) => /Groupe : reste 50\s000\sFCFA/.test(b.textContent ?? ""))).toHaveLength(2);
+    expect(sejours.find((b) => b.textContent?.includes("Chambre 103"))).toHaveTextContent(/Reste 20\s000\sFCFA/);
+  });
+
   it("modifie la fiche, et « Fermer » ne change rien", async () => {
     const { appels } = simuler();
     rendreConnecte(<Clients />);
@@ -281,7 +299,7 @@ describe("Clients : fiche", () => {
     expect(screen.getByRole("button", { name: "Changer de client" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Chercher un client déjà venu")).not.toBeInTheDocument();
 
-    await userEvent.click(await screen.findByRole("radio", { name: /Chambre 101/ }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /Chambre 101/ }));
     await userEvent.click(screen.getByRole("button", { name: "Enregistrer la réservation" }));
     await waitFor(() => expect(appel(appels, "creer_reservation")).toMatchObject({ donnees: { client_id: "cl1", chambre_id: "c101" } }));
     expect(await screen.findByText(/La réservation de Mbarga Aline est enregistrée/)).toBeInTheDocument();

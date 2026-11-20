@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { pluriel } from "../../lib/dates";
 import { aujourdhui } from "../../lib/format";
 import { FicheReservation } from "./FicheReservation";
-import { NouvelleReservation } from "./NouvelleReservation";
+import { messageCreation, NouvelleReservation } from "./NouvelleReservation";
 import { Tableau } from "./Tableau";
 
 type Vue =
@@ -31,17 +30,19 @@ export function Reservations() {
         chambreInitiale={vue.chambreId}
         arriveeInitiale={vue.arrivee}
         onRetour={retour}
-        onCree={(r) =>
-          setVue({
-            type: "fiche",
-            id: r.id,
-            message: `La réservation de ${r.client_nom} est enregistrée (chambre ${r.chambre_numero}, ${pluriel(r.nuits, "nuit")}). Si le client verse un acompte, encaissez-le ci-dessous.`,
-          })
-        }
+        onCree={(r, chambres) => setVue({ type: "fiche", id: r.id, message: messageCreation(r, chambres) })}
       />
     );
   } else if (vue.type === "fiche") {
-    contenu = <FicheReservation key={vue.id} id={vue.id} messageInitial={vue.message} onRetour={retour} />;
+    contenu = (
+      <FicheReservation
+        key={vue.id}
+        id={vue.id}
+        messageInitial={vue.message}
+        onRetour={retour}
+        onOuvrir={(id) => setVue({ type: "fiche", id })}
+      />
+    );
   } else {
     contenu = (
       <Tableau

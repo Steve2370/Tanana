@@ -144,6 +144,28 @@ pub struct Parametres {
     pub mentions_documents: Option<String>,
 }
 
+enum_texte!(FormatLogo { Png => "png", Jpeg => "jpeg" });
+
+/// Logo de l'hôtel : une image PNG ou JPEG, en base64.
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq)]
+#[ts(export)]
+pub struct Logo {
+    pub format: FormatLogo,
+    /// L'image, en base64.
+    pub donnees: String,
+    pub largeur: u32,
+    pub hauteur: u32,
+}
+
+/// Image choisie dans les réglages (déjà réduite par l'interface).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NouveauLogo {
+    pub format: FormatLogo,
+    /// L'image, en base64.
+    pub donnees: String,
+}
+
 // ─────────────────────────── Hébergement ───────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq)]
@@ -234,6 +256,13 @@ pub struct Reservation {
     pub statut: StatutReservation,
     pub notes: Option<String>,
     pub cree_le: String,
+    /// Réservation de plusieurs chambres : le groupe dont cette chambre fait partie.
+    #[serde(default)]
+    pub groupe_id: Option<String>,
+    /// Chambre d'un groupe : reste à payer du groupe entier (c'est lui qui compte,
+    /// `solde` ne regarde que les paiements enregistrés sur cette chambre).
+    #[serde(default)]
+    pub solde_groupe: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -246,6 +275,47 @@ pub struct NouvelleReservation {
     /// Si absent : prix par défaut du type de chambre × nombre de nuits.
     pub prix_total: Option<i64>,
     pub notes: Option<String>,
+}
+
+/// Une chambre d'une réservation de groupe.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ChambreDuGroupe {
+    pub chambre_id: String,
+    /// Si absent : prix par défaut du type de chambre × nombre de nuits.
+    pub prix_total: Option<i64>,
+}
+
+/// Plusieurs chambres pour un même client, aux mêmes dates.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NouveauGroupe {
+    pub client_id: String,
+    pub chambres: Vec<ChambreDuGroupe>,
+    pub date_arrivee: NaiveDate,
+    pub date_depart: NaiveDate,
+    /// Nom facultatif du groupe (« Équipe SOGEA »).
+    pub nom: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Un groupe et ses chambres. L'argent se compte pour tout le groupe.
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq)]
+#[ts(export)]
+pub struct Groupe {
+    pub id: String,
+    pub nom: Option<String>,
+    pub client_id: String,
+    pub client_nom: String,
+    /// Toutes les chambres, y compris celles annulées, par numéro.
+    pub reservations: Vec<Reservation>,
+    /// Ce que le client doit pour les chambres non annulées.
+    pub total_a_payer: i64,
+    /// Encaissé net (encaissements moins remboursements), toutes chambres confondues.
+    pub total_encaisse: i64,
+    /// Reste à payer pour le groupe (négatif s'il a trop payé).
+    pub solde: i64,
+    pub cree_le: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

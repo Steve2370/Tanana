@@ -136,6 +136,10 @@ commande!(reservations_du_client(client_id: String) -> Vec<Reservation> =>
 commande!(chambres_disponibles(arrivee: NaiveDate, depart: NaiveDate) -> Vec<Chambre> =>
     |t, tok| t.chambres_disponibles(tok, arrivee, depart));
 commande!(creer_reservation(donnees: NouvelleReservation) -> Reservation => |t, tok| t.creer_reservation(tok, donnees));
+commande!(creer_groupe(donnees: NouveauGroupe) -> Groupe => |t, tok| t.creer_groupe(tok, donnees));
+commande!(obtenir_groupe(id: String) -> Groupe => |t, tok| t.obtenir_groupe(tok, &id));
+commande!(ajouter_au_groupe(groupe_id: String, chambre_id: String, prix_total: Option<i64>) -> Groupe
+    => |t, tok| t.ajouter_au_groupe(tok, &groupe_id, &chambre_id, prix_total));
 commande!(modifier_reservation(id: String, donnees: ModificationReservation) -> Reservation =>
     |t, tok| t.modifier_reservation(tok, &id, donnees));
 commande!(annuler_reservation(id: String, motif: String) -> Reservation => |t, tok| t.annuler_reservation(tok, &id, &motif));
@@ -448,5 +452,7 @@ pub fn ouvrir_dossier_documents(app: AppHandle, type_document: TypeDocument) -> 
 
 commande!(parametres() -> Parametres => |t, tok| t.parametres(tok));
 commande!(modifier_parametres(donnees: Parametres) -> Parametres => |t, tok| t.modifier_parametres(tok, donnees));
+commande!(logo_hotel() -> Option<Logo> => |t, tok| t.logo_hotel(tok));
+commande!(definir_logo(image: Option<NouveauLogo>) -> Option<Logo> => |t, tok| t.definir_logo(tok, image));
 commande!(sauvegarder_vers(chemin: String) -> () => |t, tok| t.sauvegarder_vers(tok, &PathBuf::from(&chemin)));
 commande!(exporter_cle_base(mot_de_passe: String) -> Option<String> => |t, tok| t.exporter_cle_base(tok, &mot_de_passe));

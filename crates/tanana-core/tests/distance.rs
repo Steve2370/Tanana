@@ -118,6 +118,67 @@ fn l_administrateur_retrouve_l_hotel_a_l_identique() {
 }
 
 #[test]
+fn le_logo_de_l_hotel_arrive_chez_l_administrateur_et_ne_se_change_pas_a_distance() {
+    let (mut h, _) = hotel_vivant();
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAYAAAD/Rn+7AAAAOUlEQVR4Xu3QQQ0AMAjAQMYPiZt/HyPBQj88egqanrrvx2K5uG0YSHmQ8iDlQcqDlAcpD1IepDxINcfFAeNBdYkVAAAAAElFTkSuQmCC";
+    let logo = h.t.definir_logo(&h.admin, Some(NouveauLogo { format: FormatLogo::Png, donnees: PNG.into() })).unwrap();
+    let relais = RelaisMemoire::default();
+    let (mut copie, _, jeton) = relier(&mut h, &relais);
+    assert_eq!(copie.logo_hotel(&jeton).unwrap(), logo);
+    assert!(matches!(copie.definir_logo(&jeton, None), Err(Erreur::LectureSeule)));
+
+    // Retiré à l'hôtel : retiré chez l'administrateur à l'envoi suivant
+    h.t.definir_logo(&h.admin, None).unwrap();
+    h.t.synchroniser(&relais).unwrap();
+    copie.mettre_a_jour_copie(&relais).unwrap();
+    assert_eq!(copie.logo_hotel(&jeton).unwrap(), None);
+}
+
+#[test]
+fn un_groupe_arrive_chez_l_administrateur_avec_son_compte() {
+    let (mut h, _) = hotel_vivant();
+    let tc = h.type_chambre("Suite", 60_000);
+    let (c2, c3) = (h.chambre("201", &tc.id), h.chambre("202", &tc.id));
+    let cl = h.client("SOGEA");
+    let g = h
+        .t
+        .creer_groupe(
+            &h.admin,
+            NouveauGroupe {
+                client_id: cl.id,
+                chambres: vec![
+                    ChambreDuGroupe { chambre_id: c2.id, prix_total: None },
+                    ChambreDuGroupe { chambre_id: c3.id, prix_total: Some(100_000) },
+                ],
+                date_arrivee: d("2026-03-20"),
+                date_depart: d("2026-03-22"),
+                nom: Some("Équipe SOGEA".into()),
+                notes: None,
+            },
+        )
+        .unwrap();
+    h.t.encaisser(
+        &h.admin,
+        Encaissement {
+            reservation_id: g.reservations[0].id.clone(),
+            montant: 50_000,
+            type_paiement: TypePaiement::Acompte,
+            mode: ModePaiement::Virement,
+            note: None,
+        },
+    )
+    .unwrap();
+    h.t.imprimer_facture(&h.admin, &g.reservations[1].id, 60).unwrap();
+    let relais = RelaisMemoire::default();
+    let (mut copie, _, jeton) = relier(&mut h, &relais);
+    assert_eq!(copie.obtenir_groupe(&jeton, &g.id).unwrap(), h.t.obtenir_groupe(&h.admin, &g.id).unwrap());
+    let r2 = &g.reservations[1].id;
+    assert_eq!(copie.paiements_reservation(&jeton, r2).unwrap(), h.t.paiements_reservation(&h.admin, r2).unwrap());
+    assert_eq!(copie.documents_reservation(&jeton, r2).unwrap(), h.t.documents_reservation(&h.admin, r2).unwrap());
+    assert!(matches!(copie.ajouter_au_groupe(&jeton, &g.id, "x", None), Err(Erreur::LectureSeule)));
+}
+
+#[test]
 fn les_secrets_ne_quittent_jamais_l_hotel_et_le_relais_ne_lit_rien() {
     let (mut h, _) = hotel_vivant();
     let relais = RelaisMemoire::default();

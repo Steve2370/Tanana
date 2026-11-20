@@ -43,8 +43,9 @@ npm run qa:fuzz                          # fuzzing des formulaires, singe de 200
 FUZZ_SEED=hasard npm run qa:fuzz         # nouvelle série au hasard ; la graine s'affiche en cas d'échec
 FUZZ_SEED=123 npm run qa:fuzz            # rejouer exactement une série
 cargo test -p tanana-core --test qa_fuzz # fuzzing Rust (clés, identifiants, montants en lettres, taxes)
-npm run qa:fenetres                      # chaque écran dans Chrome, de 1024 à 1920 px (Chrome requis)
-python3 scripts/qa/muter-ecrans.py scripts/qa/series/serie1.py   # 15 mutants d'écran, dans une copie jetable
+npm run qa:fenetres                      # chaque écran et chaque parcours (groupe…) dans Chrome, de 1024 à 1920 px
+python3 scripts/qa/muter-ecrans.py scripts/qa/series/serie1.py   # 15 mutants d'écran, dans une copie jetable (séries 1 à 4)
+sh scripts/qa/test-sauvegarde-relais.sh  # la sauvegarde nocturne du relais, avec un faux docker
 npm run qa:mutants                       # mutants Rust (cargo install cargo-mutants ; long : ~20 s par mutant)
 ```
 

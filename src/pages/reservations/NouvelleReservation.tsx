@@ -4,10 +4,13 @@ import { ArrowLeft, Check } from "lucide-react";
 import type { Chambre } from "../../bindings/Chambre";
 import type { Client } from "../../bindings/Client";
 import type { DetailTaxes } from "../../bindings/DetailTaxes";
+import type { Groupe } from "../../bindings/Groupe";
+import type { NouveauGroupe } from "../../bindings/NouveauGroupe";
+import type { NouvelleReservation as DonneesReservation } from "../../bindings/NouvelleReservation";
 import type { Reservation } from "../../bindings/Reservation";
 import type { Taxe } from "../../bindings/Taxe";
 import { ChampDate, Compteur } from "../../components/saisie";
-import { ResumeTaxes } from "../../components/taxes";
+import { cumulerTaxes, ResumeTaxes } from "../../components/taxes";
 import { Alerte, Bouton, Carte, Champ, EnTete, useAction } from "../../components/ui";
 import { api } from "../../lib/api";
 import { ajouterJours, formatJourLong, formatSejour, pluriel } from "../../lib/dates";
@@ -30,7 +33,8 @@ export function NouvelleReservation({
   clientInitial?: Client;
   libelleRetour?: string;
   onRetour: () => void;
-  onCree: (r: Reservation) => void;
+  /** `chambres` : nombre de chambres réservées (plus d'une : un groupe, `r` est sa première chambre). */
+  onCree: (r: Reservation, chambres: number) => void;
 }) {
   const devise = useDevise();
   const [arrivee, setArrivee] = useState(arriveeInitiale ?? aujourdhui());
@@ -39,12 +43,18 @@ export function NouvelleReservation({
 
   const [libres, setLibres] = useState<Chambre[] | null>(null);
   const [erreurChambres, setErreurChambres] = useState<string | null>(null);
-  const [chambreId, setChambreId] = useState<string | null>(chambreInitiale ?? null);
+  /** Chambres cochées, dans l'ordre du choix. Plusieurs : une réservation de groupe. */
+  const [chambreIds, setChambreIds] = useState<string[]>(chambreInitiale ? [chambreInitiale] : []);
   const [client, setClient] = useState<Client | null>(clientInitial ?? null);
   const [prixDifferent, setPrixDifferent] = useState(false);
-  const [prixSaisi, setPrixSaisi] = useState("");
+  /** Prix convenu, chambre par chambre. */
+  const [prixSaisis, setPrixSaisis] = useState<Record<string, string>>({});
+  const [nomGroupe, setNomGroupe] = useState("");
   const [notes, setNotes] = useState("");
-  const { lancer, enCours, erreur, setErreur } = useAction(api.creerReservation);
+  const { lancer, enCours, erreur, setErreur } = useAction(
+    (d: { seule: DonneesReservation } | { groupe: NouveauGroupe }): Promise<Reservation> =>
+      "seule" in d ? api.creerReservation(d.seule) : api.creerGroupe(d.groupe).then(premiereChambre),
+  );
 
   // Les chambres proposées sont seulement celles qui sont libres à ces dates.
   useEffect(() => {
@@ -64,12 +74,20 @@ export function NouvelleReservation({
   }, [arrivee, depart]);
 
   // Un message d'erreur disparaît dès que la personne corrige quelque chose.
-  useEffect(() => setErreur(null), [setErreur, arrivee, nuits, chambreId, client, prixDifferent, prixSaisi]);
+  useEffect(() => setErreur(null), [setErreur, arrivee, nuits, chambreIds, client, prixDifferent, prixSaisis]);
 
-  const chambre = libres?.find((c) => c.id === chambreId) ?? null;
-  const choixPlusLibre = libres !== null && chambreId !== null && chambre === null;
-  const prixNormal = chambre ? chambre.prix_nuit_defaut * nuits : null;
-  const prixRetenu = prixDifferent ? lireMontant(prixSaisi, devise.decimales) : prixNormal;
+  const chambres = libres === null ? [] : chambreIds.flatMap((id) => libres.filter((c) => c.id === id));
+  const choixPlusLibre = libres !== null && chambres.length < chambreIds.length;
+  const groupe = chambres.length > 1;
+  const premiere = chambres[0];
+  const cocher = (id: string, coche: boolean) =>
+    setChambreIds((ids) => (coche ? [...ids.filter((x) => x !== id), id] : ids.filter((x) => x !== id)));
+  const prixNormal = (c: Chambre) => c.prix_nuit_defaut * nuits;
+  /** Prix retenu pour chaque chambre (null : prix convenu illisible). */
+  const prixRetenus = chambres.map((c) => (prixDifferent ? lireMontant(prixSaisis[c.id] ?? "", devise.decimales) : prixNormal(c)));
+  const prixLisibles = prixRetenus.every((p) => p !== null);
+  const totalPrix = prixRetenus.reduce<number>((t, p) => t + (p ?? 0), 0);
+  const cleTaxes = chambres.length > 0 && prixLisibles ? `${nuits}:${prixRetenus.join(",")}` : null;
 
   // Taxes habituelles de l'hôtel : elles s'appliqueront à cette réservation.
   const [taxesHotel, setTaxesHotel] = useState<Taxe[]>([]);
@@ -78,34 +96,55 @@ export function NouvelleReservation({
   }, []);
   const [detailTaxes, setDetailTaxes] = useState<DetailTaxes | null>(null);
   useEffect(() => {
-    if (taxesHotel.length === 0 || prixRetenu === null) return setDetailTaxes(null);
+    if (taxesHotel.length === 0 || cleTaxes === null) return setDetailTaxes(null);
     let annule = false;
-    api.calculerTaxes(prixRetenu, nuits, taxesHotel).then(
-      (d) => !annule && setDetailTaxes(d),
+    const [n = "1", prix = ""] = cleTaxes.split(":");
+    // Une chambre après l'autre, puis le tout additionné (comme sur la facture du groupe).
+    Promise.all(prix.split(",").map((p) => api.calculerTaxes(Number(p), Number(n), taxesHotel))).then(
+      (d) => !annule && setDetailTaxes(cumulerTaxes(d)),
       () => !annule && setDetailTaxes(null),
     );
     return () => {
       annule = true;
     };
-  }, [taxesHotel, prixRetenu, nuits]);
+  }, [taxesHotel, cleTaxes]);
 
   const enregistrer = async () => {
-    if (!chambre) return setErreur("Choisissez une chambre (étape 2).");
+    if (!premiere) return setErreur("Choisissez une chambre (étape 2).");
     if (!client) return setErreur("Choisissez le client (étape 3).");
-    let prix: number | null = null;
-    if (prixDifferent) {
-      prix = lireMontant(prixSaisi, devise.decimales);
-      if (prix === null) return setErreur("Le prix n'est pas lisible. Écrivez seulement des chiffres, par exemple 40000.");
+    const illisible = chambres.find((_, i) => prixRetenus[i] === null);
+    if (illisible) {
+      return setErreur(
+        groupe
+          ? `Le prix de la chambre ${illisible.numero} n'est pas lisible. Écrivez seulement des chiffres, par exemple 40000.`
+          : "Le prix n'est pas lisible. Écrivez seulement des chiffres, par exemple 40000.",
+      );
     }
-    const r = await lancer({
-      chambre_id: chambre.id,
-      client_id: client.id,
-      date_arrivee: arrivee,
-      date_depart: depart,
-      prix_total: prix,
-      notes: notes.trim() || null,
-    });
-    if (r) onCree(r);
+    const prixEnvoye = (i: number) => (prixDifferent ? (prixRetenus[i] ?? null) : null);
+    const r = await lancer(
+      groupe
+        ? {
+            groupe: {
+              client_id: client.id,
+              chambres: chambres.map((c, i) => ({ chambre_id: c.id, prix_total: prixEnvoye(i) })),
+              date_arrivee: arrivee,
+              date_depart: depart,
+              nom: nomGroupe.trim() || null,
+              notes: notes.trim() || null,
+            },
+          }
+        : {
+            seule: {
+              chambre_id: premiere.id,
+              client_id: client.id,
+              date_arrivee: arrivee,
+              date_depart: depart,
+              prix_total: prixEnvoye(0),
+              notes: notes.trim() || null,
+            },
+          },
+    );
+    if (r) onCree(r, chambres.length);
   };
 
   return (
@@ -130,20 +169,31 @@ export function NouvelleReservation({
           {erreurChambres && <Alerte type="erreur">{erreurChambres}</Alerte>}
           {choixPlusLibre && (
             <div className="mb-4">
-              <Alerte type="attention">La chambre choisie n'est pas libre à ces dates. Choisissez-en une autre, ou changez les dates.</Alerte>
+              <Alerte type="attention">
+                {chambreIds.length > 1 ? "Une chambre choisie n'est plus libre" : "La chambre choisie n'est pas libre"} à ces dates.
+                Choisissez-en une autre, ou changez les dates.
+              </Alerte>
             </div>
           )}
           {libres?.length === 0 && <AucuneChambreLibre />}
           {libres && libres.length > 0 && (
             <>
-              <p className="mb-3 text-gris">{pluriel(libres.length, "chambre")} libre{libres.length > 1 ? "s" : ""} à ces dates :</p>
-              <div role="radiogroup" aria-label="Chambre" className="grid grid-cols-2 gap-3">
+              <p className="mb-1 text-gris">{pluriel(libres.length, "chambre")} libre{libres.length > 1 ? "s" : ""} à ces dates.</p>
+              <p className="mb-3 text-gris">
+                Cochez la chambre. Pour une équipe ou une entreprise, cochez-en plusieurs : une seule facture les regroupera.
+              </p>
+              <div role="group" aria-label="Chambres" className="grid grid-cols-2 gap-3">
                 {libres.map((c) => (
                   <label
                     key={c.id}
                     className="flex min-h-16 cursor-pointer items-center gap-3 rounded-xl border-2 border-trait px-4 py-2 has-[:checked]:border-marque has-[:checked]:bg-marque-clair hover:border-marque/40"
                   >
-                    <input type="radio" name="chambre" className="size-5 accent-marque" checked={chambreId === c.id} onChange={() => setChambreId(c.id)} />
+                    <input
+                      type="checkbox"
+                      className="size-5 accent-marque"
+                      checked={chambreIds.includes(c.id)}
+                      onChange={(e) => cocher(c.id, e.target.checked)}
+                    />
                     <span>
                       <span className="block text-lg font-bold">Chambre {c.numero}</span>
                       <span className="block text-gris">
@@ -153,6 +203,11 @@ export function NouvelleReservation({
                   </label>
                 ))}
               </div>
+              {groupe && (
+                <p className="mt-3 rounded-xl bg-marque-clair px-4 py-3 text-lg font-semibold text-marque-fonce" role="status">
+                  {pluriel(chambres.length, "chambre")} pour le même client : {listeNumeros(chambres)}.
+                </p>
+              )}
             </>
           )}
         </Etape>
@@ -162,28 +217,63 @@ export function NouvelleReservation({
         </Etape>
 
         <Etape numero={4} titre="Le prix">
-          {prixNormal === null ? (
+          {!premiere ? (
             <p className="text-gris">Le prix s'affichera quand la chambre sera choisie.</p>
-          ) : (
+          ) : !groupe ? (
             <p className="text-lg">
-              {pluriel(nuits, "nuit")} × {formatMontant(chambre!.prix_nuit_defaut, devise)} ={" "}
-              <strong className="text-2xl">{formatMontant(prixNormal, devise)}</strong>
+              {pluriel(nuits, "nuit")} × {formatMontant(premiere.prix_nuit_defaut, devise)} ={" "}
+              <strong className="text-2xl">{formatMontant(prixNormal(premiere), devise)}</strong>
             </p>
+          ) : (
+            <div>
+              <ul aria-label="Prix par chambre" className="grid gap-1 text-lg">
+                {chambres.map((c) => (
+                  <li key={c.id} className="flex flex-wrap justify-between gap-x-4">
+                    <span>
+                      Chambre {c.numero} : {pluriel(nuits, "nuit")} × {formatMontant(c.prix_nuit_defaut, devise)}
+                    </span>
+                    <span className="font-semibold">{formatMontant(prixNormal(c), devise)}</span>
+                  </li>
+                ))}
+              </ul>
+              {!prixDifferent && (
+                <p className="mt-2 flex justify-between gap-4 border-t border-trait pt-2 text-lg">
+                  <span>Total des {pluriel(chambres.length, "chambre")}</span>
+                  <strong className="text-2xl">{formatMontant(totalPrix, devise)}</strong>
+                </p>
+              )}
+            </div>
           )}
           <label className="mt-4 flex min-h-12 cursor-pointer items-center gap-3 font-semibold">
             <input type="checkbox" className="size-5 accent-marque" checked={prixDifferent} onChange={(e) => setPrixDifferent(e.target.checked)} />
             Appliquer un autre prix (prix convenu avec le client)
           </label>
-          {prixDifferent && (
-            <Champ
-              className="mt-2 max-w-sm"
-              libelle="Prix total convenu"
-              value={prixSaisi}
-              onChange={(e) => setPrixSaisi(e.target.value)}
-              inputMode="decimal"
-              aide={`Pour tout le séjour, en ${devise.code}.`}
-            />
-          )}
+          {prixDifferent &&
+            (groupe ? (
+              <div className="mt-2 grid max-w-xl gap-3">
+                {chambres.map((c) => (
+                  <Champ
+                    key={c.id}
+                    libelle={`Prix convenu pour la chambre ${c.numero}`}
+                    value={prixSaisis[c.id] ?? ""}
+                    onChange={(e) => setPrixSaisis((p) => ({ ...p, [c.id]: e.target.value }))}
+                    inputMode="decimal"
+                    aide={`Pour tout le séjour de cette chambre, en ${devise.code}.`}
+                  />
+                ))}
+              </div>
+            ) : (
+              premiere && (
+                <Champ
+                  className="mt-2 max-w-sm"
+                  libelle="Prix total convenu"
+                  value={prixSaisis[premiere.id] ?? ""}
+                  onChange={(e) => setPrixSaisis({ [premiere.id]: e.target.value })}
+                  inputMode="decimal"
+                  aide={`Pour tout le séjour, en ${devise.code}.`}
+                />
+              )
+            ))}
           {detailTaxes && (
             <div className="mt-4 rounded-xl border-2 border-trait px-4 py-3">
               <p className="mb-2 font-bold">Taxes de l'hôtel</p>
@@ -194,6 +284,16 @@ export function NouvelleReservation({
               </p>
               <p className="mt-1 text-base text-gris">Les taxes pourront être changées ensuite, sur la fiche de la réservation.</p>
             </div>
+          )}
+          {groupe && (
+            <Champ
+              className="mt-5 max-w-xl"
+              libelle="Nom du groupe (facultatif)"
+              value={nomGroupe}
+              onChange={(e) => setNomGroupe(e.target.value)}
+              maxLength={80}
+              aide="Par exemple : Équipe SOGEA, Mariage Ngono. Il apparaît sur la facture."
+            />
           )}
           <div className="mt-5">
             <label htmlFor="notes-reservation" className="mb-1.5 block font-semibold">
@@ -209,9 +309,10 @@ export function NouvelleReservation({
           </div>
         </Etape>
 
-        {chambre && client && (
+        {premiere && client && (
           <Alerte type="info" titre="Vérifiez avant d'enregistrer">
-            {nomComplet(client)} — chambre {chambre.numero} — {formatSejour(arrivee, depart)} ({pluriel(nuits, "nuit")}).
+            {nomComplet(client)} — {groupe ? `chambres ${listeNumeros(chambres)}` : `chambre ${premiere.numero}`} —{" "}
+            {formatSejour(arrivee, depart)} ({pluriel(nuits, "nuit")}).
           </Alerte>
         )}
         {erreur && <Alerte type="erreur">{erreur}</Alerte>}
@@ -220,12 +321,33 @@ export function NouvelleReservation({
             Annuler
           </Bouton>
           <Bouton icone={Check} enCours={enCours} onClick={() => void enregistrer()} grand>
-            Enregistrer la réservation
+            {groupe ? `Enregistrer les ${chambres.length} chambres` : "Enregistrer la réservation"}
           </Bouton>
         </div>
       </div>
     </>
   );
+}
+
+/** Message affiché sur la fiche qui s'ouvre après l'enregistrement. */
+export function messageCreation(r: Reservation, chambres: number): string {
+  const acompte = "Si le client verse un acompte, encaissez-le ci-dessous.";
+  return chambres > 1
+    ? `La réservation de groupe de ${r.client_nom} est enregistrée (${pluriel(chambres, "chambre")}, ${pluriel(r.nuits, "nuit")}). ${acompte}`
+    : `La réservation de ${r.client_nom} est enregistrée (chambre ${r.chambre_numero}, ${pluriel(r.nuits, "nuit")}). ${acompte}`;
+}
+
+/** La fiche qui s'ouvre après la création d'un groupe : celle de sa première chambre. */
+function premiereChambre(g: Groupe): Reservation {
+  const r = g.reservations[0];
+  if (!r) throw new Error("groupe sans chambre");
+  return r;
+}
+
+/** « 101, 102 et 201 » */
+export function listeNumeros(chambres: { numero: string }[]): string {
+  const n = chambres.map((c) => c.numero);
+  return n.length < 2 ? (n[0] ?? "") : `${n.slice(0, -1).join(", ")} et ${n[n.length - 1]}`;
 }
 
 function Etape({ numero, titre, children }: { numero: number; titre: string; children: ReactNode }) {

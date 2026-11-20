@@ -307,6 +307,34 @@ describe("Caisse : selon les droits du compte", () => {
     expect(appels.some((a) => a.commande === "rapport_caisse" || a.commande === "lister_paiements")).toBe(false);
   });
 
+  it("encaisser sans voir la caisse : un message clair, aucun montant, rien n'est demandé à Rust", async () => {
+    const { appels } = simuler();
+    rendreConnecte(<Caisse />, session(["paiement.encaisser"], { role_id: "role-reception" }));
+    const avis = (await screen.findByText("Vous n'avez pas accès au montant de la caisse")).closest("[role]")!;
+    expect(avis).toHaveTextContent("Vous n'avez pas accès au montant de la caisse");
+    expect(avis).toHaveTextContent("Vous pouvez encaisser les paiements des clients depuis leur réservation.");
+    expect(screen.queryByText("Argent entré")).not.toBeInTheDocument();
+    expect(screen.queryByText("Paiements des clients")).not.toBeInTheDocument();
+    expect(screen.queryByText(/FCFA/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Période" })).not.toBeInTheDocument();
+    expect(appels.some((a) => ["rapport_caisse", "lister_paiements", "lister_depenses"].includes(a.commande))).toBe(false);
+  });
+
+  it("dépenses en lecture sans le rapport : le message, puis les dépenses", async () => {
+    simuler();
+    rendreConnecte(<Caisse />, session(["depense.voir"], { role_id: "role-x" }));
+    expect(await screen.findByText("Vous n'avez pas accès au montant de la caisse")).toBeInTheDocument();
+    expect(screen.queryByText(/Vous pouvez encaisser/)).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Période" })).toBeInTheDocument();
+  });
+
+  it("avec le rapport : pas de message d'accès", async () => {
+    simuler();
+    rendreConnecte(<Caisse />, session(["rapport.financier.voir"], { role_id: "role-x" }));
+    await screen.findByRole("list", { name: "Paiements des clients" });
+    expect(screen.queryByText("Vous n'avez pas accès au montant de la caisse")).not.toBeInTheDocument();
+  });
+
   it("avec seulement le rapport : pas de carte Dépenses", async () => {
     const { appels } = simuler();
     rendreConnecte(<Caisse />, session(["rapport.financier.voir"], { role_id: "role-x" }));

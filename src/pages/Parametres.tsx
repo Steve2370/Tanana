@@ -1,9 +1,20 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 
-import { HardDriveDownload, History } from "lucide-react";
+import { Check, HardDriveDownload, History, ImageUp, Trash2 } from "lucide-react";
 
-import { Alerte, Bouton, Carte, Champ, ChampMotDePasse, EnTete, useAction, ZoneTexte } from "../components/ui";
+import {
+  Alerte,
+  Bouton,
+  Carte,
+  Champ,
+  ChampMotDePasse,
+  EnTete,
+  useAction,
+  useConfirmation,
+  ZoneTexte,
+} from "../components/ui";
+import type { NouveauLogo } from "../bindings/NouveauLogo";
 import type { Taxe } from "../bindings/Taxe";
 import { CarteMisesAJour } from "../components/miseAJour";
 import { RemettreCopie } from "../components/restauration";
@@ -11,6 +22,7 @@ import { EditeurTaxes } from "../components/taxes";
 import { api } from "../lib/api";
 import { versErreur } from "../lib/erreurs";
 import { aujourdhui, formatMontant } from "../lib/format";
+import { ImageRefusee, preparerLogo, urlLogo, useLogoHotel } from "../lib/logoHotel";
 import { SiPermis, useDevise, useSession } from "../lib/session";
 import { ReglagesDistance } from "./distance/ReglagesDistance";
 
@@ -19,11 +31,14 @@ export function Parametres() {
     <>
       <EnTete
         titre="Réglages"
-        sousTitre="Les informations de l'hôtel, les taxes, les sauvegardes, la consultation à distance, les mises à jour et la clé de protection des données."
+        sousTitre="Les informations de l'hôtel, son logo, les taxes, les sauvegardes, la consultation à distance, les mises à jour et la clé de protection des données."
       />
       <div className="grid max-w-3xl gap-6">
         <SiPermis permission="parametres.gerer">
           <ParametresHotel />
+        </SiPermis>
+        <SiPermis permission="parametres.gerer">
+          <LogoDeLHotel />
         </SiPermis>
         <SiPermis permission="parametres.gerer">
           <TaxesHotel />
@@ -146,6 +161,119 @@ function ParametresHotel() {
           </Bouton>
         </div>
       </form>
+    </Carte>
+  );
+}
+
+function LogoDeLHotel() {
+  const { logo, changer } = useLogoHotel();
+  const [propose, setPropose] = useState<NouveauLogo | null>(null);
+  const [preparation, setPreparation] = useState(false);
+  const [erreurImage, setErreurImage] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const champ = useRef<HTMLInputElement>(null);
+  const { confirmer, fenetre } = useConfirmation();
+  const { lancer, enCours, erreur, setErreur } = useAction(api.definirLogo);
+
+  const choisir = async (fichier: File | undefined) => {
+    if (champ.current) champ.current.value = ""; // pour pouvoir rechoisir le même fichier
+    if (!fichier) return;
+    setOk(null);
+    setErreur(null);
+    setErreurImage(null);
+    setPreparation(true);
+    try {
+      setPropose(await preparerLogo(fichier));
+    } catch (e) {
+      setErreurImage(e instanceof ImageRefusee ? e.message : "Cette image n'a pas pu être ouverte. Choisissez-en une autre.");
+    } finally {
+      setPreparation(false);
+    }
+  };
+
+  const enregistrer = async () => {
+    if (!propose) return;
+    const r = await lancer(propose);
+    if (r !== undefined) {
+      changer(r);
+      setPropose(null);
+      setOk("Le logo est enregistré. Il apparaît en haut à gauche et sur les prochains reçus et factures.");
+    }
+  };
+
+  const retirer = async () => {
+    setOk(null);
+    const oui = await confirmer({
+      titre: "Retirer le logo ?",
+      message: "Le symbole de Tanana reviendra en haut à gauche. Les reçus et factures déjà imprimés gardent leur logo.",
+      libelleConfirmer: "Oui, retirer le logo",
+    });
+    if (!oui) return;
+    const r = await lancer(null);
+    if (r !== undefined) {
+      changer(null);
+      setOk("Le logo est retiré.");
+    }
+  };
+
+  const affiche = propose ?? logo;
+  return (
+    <Carte titre="Logo de l'hôtel">
+      {fenetre}
+      <div className="grid gap-4">
+        <p className="text-base text-gris">
+          Il apparaît en haut à gauche, à côté du nom de l'hôtel, et en tête des reçus et factures. Une image PNG ou JPEG ;
+          un fond transparent donne le plus joli résultat.
+        </p>
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="flex size-32 shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-trait bg-white p-2">
+            {affiche ? (
+              <img
+                src={urlLogo(affiche)}
+                alt={propose ? "Nouveau logo, pas encore enregistré" : "Logo actuel de l'hôtel"}
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : (
+              <span className="text-center text-base text-gris">Aucun logo</span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <input
+              ref={champ}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              aria-label="Image du logo"
+              className="hidden"
+              onChange={(e) => void choisir(e.target.files?.[0])}
+            />
+            {propose ? (
+              <>
+                <Bouton icone={Check} enCours={enCours} onClick={() => void enregistrer()}>
+                  Enregistrer ce logo
+                </Bouton>
+                <Bouton variante="secondaire" disabled={enCours} onClick={() => setPropose(null)}>
+                  Annuler
+                </Bouton>
+              </>
+            ) : (
+              <>
+                <Bouton icone={ImageUp} enCours={preparation} onClick={() => champ.current?.click()}>
+                  {logo ? "Changer le logo…" : "Choisir une image…"}
+                </Bouton>
+                {logo && (
+                  <Bouton variante="secondaire" icone={Trash2} disabled={enCours} onClick={() => void retirer()}>
+                    Retirer le logo
+                  </Bouton>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        {propose && <Alerte type="info">Voici le nouveau logo. Cliquez sur « Enregistrer ce logo » pour le garder.</Alerte>}
+        {erreurImage && <Alerte type="erreur">{erreurImage}</Alerte>}
+        {erreur && <Alerte type="erreur">{erreur}</Alerte>}
+        {ok && <Alerte type="succes">{ok}</Alerte>}
+      </div>
     </Carte>
   );
 }

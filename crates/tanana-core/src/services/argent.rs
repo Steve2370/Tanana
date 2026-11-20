@@ -5,16 +5,14 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
 
 use crate::audit::{self, json as en_json};
-use crate::domaine::{
-    solde_restant, texte_facultatif, texte_requis, total_encaisse, valider_encaissement, valider_remboursement,
-};
+use crate::domaine::{texte_facultatif, texte_requis, valider_encaissement, valider_remboursement};
 use crate::erreur::{Erreur, Resultat};
 use crate::modeles::{
     Depense, Encaissement, LigneMode, ModePaiement, NouvelleDepense, Paiement, PaiementDetaille, RapportCaisse,
     StatutReservation, TypePaiement,
 };
 use crate::permissions::Permission;
-use crate::services::reservations::{paiements_de, reservation};
+use crate::services::reservations::{compte, groupe, reservation};
 use crate::{Tanana, nouvel_id};
 
 fn lire_paiements(conn: &Connection, reservation_id: &str) -> Resultat<Vec<Paiement>> {
@@ -102,10 +100,19 @@ fn bornes_instants(debut: NaiveDate, fin: NaiveDate, decalage_minutes: i32) -> R
 }
 
 impl Tanana {
+    /// Paiements d'une réservation ; pour une chambre d'un groupe, ceux de tout le groupe.
     pub fn paiements_reservation(&mut self, token: &str, reservation_id: &str) -> Resultat<Vec<Paiement>> {
         self.executer(token, Some(Permission::ReservationVoir), |tx, _| {
-            reservation(tx, reservation_id)?;
-            lire_paiements(tx, reservation_id)
+            let r = reservation(tx, reservation_id)?;
+            let Some(g) = &r.groupe_id else {
+                return lire_paiements(tx, reservation_id);
+            };
+            let mut tous = Vec::new();
+            for chambre in groupe(tx, g)?.reservations {
+                tous.extend(lire_paiements(tx, &chambre.id)?);
+            }
+            tous.sort_by(|a, b| (&a.date, &a.id).cmp(&(&b.date, &b.id)));
+            Ok(tous)
         })
     }
 
@@ -119,7 +126,9 @@ impl Tanana {
             if r.statut == StatutReservation::Annulee {
                 return Err(Erreur::StatutInvalide { de: "annulee".into(), vers: "encaissement".into() });
             }
-            valider_encaissement(e.montant, r.solde)?;
+            // Dans un groupe, le paiement va au compte du groupe entier.
+            let (reste, _) = compte(tx, &r)?;
+            valider_encaissement(e.montant, reste)?;
             let id = inserer_paiement(tx, a, &r.id, e.montant, e.type_paiement, e.mode, texte_facultatif(e.note))?;
             let p = lire_paiements(tx, &r.id)?
                 .into_iter()
@@ -132,8 +141,8 @@ impl Tanana {
                 "paiement.encaissement",
                 Some("reservation"),
                 Some(&r.id),
-                Some(&json!({ "solde": r.solde })),
-                Some(&json!({ "paiement": en_json(&p)?, "solde": r.solde - e.montant })),
+                Some(&json!({ "solde": reste, "groupe": r.groupe_id })),
+                Some(&json!({ "paiement": en_json(&p)?, "solde": reste - e.montant, "groupe": r.groupe_id })),
             )?;
             Ok(p)
         })
@@ -151,7 +160,8 @@ impl Tanana {
         self.executer(token, Some(Permission::PaiementRembourser), |tx, a| {
             let motif = texte_requis(motif, "le motif du remboursement")?;
             let r = reservation(tx, reservation_id)?;
-            let encaisse = total_encaisse(&paiements_de(tx, reservation_id)?);
+            // Dans un groupe : jusqu'à ce que le groupe entier a payé.
+            let (reste_avant, encaisse) = compte(tx, &r)?;
             valider_remboursement(montant, encaisse)?;
             let id = inserer_paiement(
                 tx,
@@ -166,7 +176,7 @@ impl Tanana {
                 .into_iter()
                 .find(|p| p.id == id)
                 .ok_or(Erreur::Introuvable("paiement".into()))?;
-            let nouveau_solde = solde_restant(r.total_a_payer, &paiements_de(tx, reservation_id)?);
+            let nouveau_solde = reste_avant + montant;
             audit::ecrire(
                 tx,
                 &a.horodatage(),
@@ -174,8 +184,8 @@ impl Tanana {
                 "paiement.remboursement",
                 Some("reservation"),
                 Some(reservation_id),
-                Some(&json!({ "encaisse": encaisse, "solde": r.solde })),
-                Some(&json!({ "paiement": en_json(&p)?, "motif": motif, "solde": nouveau_solde })),
+                Some(&json!({ "encaisse": encaisse, "solde": reste_avant, "groupe": r.groupe_id })),
+                Some(&json!({ "paiement": en_json(&p)?, "motif": motif, "solde": nouveau_solde, "groupe": r.groupe_id })),
             )?;
             Ok(p)
         })

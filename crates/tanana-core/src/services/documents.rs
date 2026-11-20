@@ -17,10 +17,12 @@ use sha2::{Digest, Sha256};
 use crate::audit;
 use crate::domaine::calculer_taxes;
 use crate::erreur::{Erreur, Resultat};
-use crate::modeles::{DetailTaxes, DocumentEmis, ModePaiement, StatutReservation, TypeDocument, TypePaiement};
+use crate::modeles::{
+    DetailTaxes, DocumentEmis, FormatLogo, ModePaiement, Reservation, StatutReservation, TypeDocument, TypePaiement,
+};
 use crate::permissions::Permission;
 use crate::services::clients::client;
-use crate::services::reservations::{reservation, taxes_de};
+use crate::services::reservations::{groupe, reservation, taxes_de};
 use crate::{Acteur, Tanana, nouvel_id, pdf};
 
 // ───────────────────────────── Contenu figé ─────────────────────────────
@@ -52,6 +54,12 @@ pub struct ContenuDocument {
     pub taxes: Option<DetailTaxes>,
     /// Numéro de la facture remplacée, le cas échéant.
     pub remplace: Option<String>,
+    /// Réservation de groupe : toutes ses chambres non annulées (vide pour une chambre seule).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chambres: Vec<SejourDoc>,
+    /// Nom du groupe, s'il en a un.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groupe: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -61,6 +69,18 @@ pub struct HotelDoc {
     pub telephone: Option<String>,
     pub email: Option<String>,
     pub mentions: Option<String>,
+    /// Logo en usage à l'émission (absent sur les documents émis avant les logos).
+    #[serde(default)]
+    pub logo: Option<LogoDoc>,
+}
+
+/// Le logo d'un document : quelle image (table `logos`), et sa taille en pixels.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LogoDoc {
+    pub empreinte: String,
+    pub format: FormatLogo,
+    pub largeur: u32,
+    pub hauteur: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,9 +110,24 @@ pub struct LignePaiement {
 }
 
 impl ContenuDocument {
+    /// Vrai pour le reçu ou la facture d'une réservation de groupe.
+    pub fn est_un_groupe(&self) -> bool {
+        !self.chambres.is_empty()
+    }
+
+    /// Les chambres du document : toutes celles du groupe, ou la seule chambre.
+    pub fn sejours(&self) -> &[SejourDoc] {
+        if self.est_un_groupe() { &self.chambres } else { std::slice::from_ref(&self.sejour) }
+    }
+
+    /// Prix de l'hébergement convenu, toutes chambres confondues.
+    pub fn prix_hebergement(&self) -> i64 {
+        self.sejours().iter().map(|s| s.prix_total).sum()
+    }
+
     /// Ce que le client doit en tout : prix + taxes ajoutées.
     pub fn total_a_payer(&self) -> i64 {
-        self.taxes.as_ref().map_or(self.sejour.prix_total, |t| t.total_a_payer)
+        self.taxes.as_ref().map_or(self.prix_hebergement(), |t| t.total_a_payer)
     }
 
     /// Les taxes à afficher (vide s'il n'y en a pas).
@@ -138,6 +173,12 @@ fn empreinte<T: Serialize>(v: &T) -> Resultat<String> {
 
 fn hotel(conn: &Connection) -> Resultat<(HotelDoc, String, u8)> {
     let p = crate::services::systeme::lire_parametres(conn)?;
+    let logo = crate::services::logo::logo_en_usage(conn)?.map(|(empreinte, l)| LogoDoc {
+        empreinte,
+        format: l.format,
+        largeur: l.largeur,
+        hauteur: l.hauteur,
+    });
     Ok((
         HotelDoc {
             nom: p.nom_hotel,
@@ -145,6 +186,7 @@ fn hotel(conn: &Connection) -> Resultat<(HotelDoc, String, u8)> {
             telephone: p.telephone_hotel,
             email: p.email_hotel,
             mentions: p.mentions_documents,
+            logo,
         },
         p.devise,
         p.decimales_devise,
@@ -162,52 +204,125 @@ struct Base {
     taxes: DetailTaxes,
     /// (id du paiement, ligne) dans l'ordre où ils ont été reçus
     paiements: Vec<(String, LignePaiement)>,
+    /// Groupe : (id, nom) et toutes ses chambres non annulées.
+    groupe: Option<(String, Option<String>)>,
+    chambres: Vec<SejourDoc>,
 }
 
-fn base(conn: &Connection, reservation_id: &str, decalage: Duration) -> Resultat<Base> {
-    let r = reservation(conn, reservation_id)?;
-    let c = client(conn, &r.client_id)?;
+fn sejour_doc(conn: &Connection, r: &Reservation) -> Resultat<SejourDoc> {
     let chambre_type: String = conn.query_row(
         "SELECT t.nom FROM chambres c JOIN types_chambre t ON t.id = c.type_id WHERE c.id = ?1",
         [&r.chambre_id],
         |l| l.get(0),
     )?;
-    let mut stmt = conn.prepare(
-        "SELECT id, date, type, mode, montant, note FROM paiements WHERE reservation_id = ?1 ORDER BY date, id",
-    )?;
-    let lignes = stmt
-        .query_map([reservation_id], |l| {
-            Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let paiements = lignes
-        .into_iter()
+    Ok(SejourDoc {
+        chambre_numero: r.chambre_numero.clone(),
+        chambre_type,
+        arrivee: r.date_arrivee,
+        depart: r.date_depart,
+        nuits: r.nuits,
+        prix_total: r.prix_total,
+    })
+}
+
+/// Paiements de plusieurs réservations, dans l'ordre où ils ont été reçus.
+fn paiements_des(
+    conn: &Connection,
+    reservations: &[&str],
+    decalage: Duration,
+) -> Resultat<Vec<(String, LignePaiement)>> {
+    let mut tous = Vec::new();
+    let mut stmt =
+        conn.prepare("SELECT id, date, type, mode, montant, note FROM paiements WHERE reservation_id = ?1")?;
+    for id in reservations {
+        let lignes = stmt
+            .query_map([id], |l| {
+                Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        tous.extend(lignes);
+    }
+    tous.sort_by(|a, b| (&a.1, &a.0).cmp(&(&b.1, &b.0)));
+    tous.into_iter()
         .map(|(id, date, type_paiement, mode, montant, note)| {
             Ok((id, LignePaiement { date: date_locale(&date, decalage)?, type_paiement, mode, montant, note }))
         })
+        .collect()
+}
+
+/// Les taxes de plusieurs chambres, additionnées ligne par ligne (même taxe = même ligne).
+pub fn cumuler_taxes(details: &[DetailTaxes]) -> DetailTaxes {
+    let mut t = DetailTaxes::default();
+    for d in details {
+        t.prix += d.prix;
+        t.nuits += d.nuits;
+        t.total_comprises += d.total_comprises;
+        t.total_ajoutees += d.total_ajoutees;
+        t.hors_taxes += d.hors_taxes;
+        t.total_a_payer += d.total_a_payer;
+        for l in &d.lignes {
+            match t.lignes.iter_mut().find(|x| x.taxe == l.taxe) {
+                Some(x) => x.montant += l.montant,
+                None => t.lignes.push(l.clone()),
+            }
+        }
+    }
+    t
+}
+
+fn client_doc(conn: &Connection, client_id: &str) -> Resultat<ClientDoc> {
+    let c = client(conn, client_id)?;
+    Ok(ClientDoc {
+        nom: [Some(c.nom.clone()), c.prenom.clone()].into_iter().flatten().collect::<Vec<_>>().join(" "),
+        telephone: c.telephone,
+        email: c.email,
+    })
+}
+
+/// Base d'un document de groupe : toutes les chambres, tous les paiements.
+fn base_groupe(conn: &Connection, groupe_id: &str, decalage: Duration) -> Resultat<Base> {
+    let g = groupe(conn, groupe_id)?;
+    let actives: Vec<&Reservation> =
+        g.reservations.iter().filter(|r| r.statut != StatutReservation::Annulee).collect();
+    let chambres = actives.iter().map(|r| sejour_doc(conn, r)).collect::<Resultat<Vec<_>>>()?;
+    let premiere = actives.first().copied().or(g.reservations.first()).ok_or(Erreur::Introuvable("groupe".into()))?;
+    let ids: Vec<&str> = g.reservations.iter().map(|r| r.id.as_str()).collect();
+    let taxes = actives
+        .iter()
+        .map(|r| Ok(calculer_taxes(r.prix_total, r.nuits, &taxes_de(conn, &r.id)?)))
         .collect::<Resultat<Vec<_>>>()?;
     let (hotel, devise, decimales) = hotel(conn)?;
-    let taxes = calculer_taxes(r.prix_total, r.nuits, &taxes_de(conn, reservation_id)?);
     Ok(Base {
-        taxes,
         hotel,
         devise,
         decimales,
-        client: ClientDoc {
-            nom: [Some(c.nom.clone()), c.prenom.clone()].into_iter().flatten().collect::<Vec<_>>().join(" "),
-            telephone: c.telephone,
-            email: c.email,
-        },
-        sejour: SejourDoc {
-            chambre_numero: r.chambre_numero,
-            chambre_type,
-            arrivee: r.date_arrivee,
-            depart: r.date_depart,
-            nuits: r.nuits,
-            prix_total: r.prix_total,
-        },
+        client: client_doc(conn, &g.client_id)?,
+        sejour: sejour_doc(conn, premiere)?,
+        statut: if actives.is_empty() { StatutReservation::Annulee } else { premiere.statut },
+        taxes: cumuler_taxes(&taxes),
+        paiements: paiements_des(conn, &ids, decalage)?,
+        groupe: Some((g.id.clone(), g.nom.clone())),
+        chambres,
+    })
+}
+
+fn base(conn: &Connection, reservation_id: &str, decalage: Duration) -> Resultat<Base> {
+    let r = reservation(conn, reservation_id)?;
+    if let Some(g) = &r.groupe_id {
+        return base_groupe(conn, g, decalage);
+    }
+    let (hotel, devise, decimales) = hotel(conn)?;
+    Ok(Base {
+        taxes: calculer_taxes(r.prix_total, r.nuits, &taxes_de(conn, reservation_id)?),
+        hotel,
+        devise,
+        decimales,
+        client: client_doc(conn, &r.client_id)?,
+        sejour: sejour_doc(conn, &r)?,
         statut: r.statut,
-        paiements,
+        paiements: paiements_des(conn, &[reservation_id], decalage)?,
+        groupe: None,
+        chambres: Vec::new(),
     })
 }
 
@@ -276,12 +391,13 @@ fn inserer(
     paiement_id: Option<&str>,
     empreinte: &str,
     remplace_id: Option<&str>,
+    groupe_id: Option<&str>,
 ) -> Resultat<DocumentEmis> {
     let id = nouvel_id();
     tx.execute(
         "INSERT INTO documents (id, type, annee, sequence, numero, reservation_id, paiement_id, contenu, empreinte,
-                                remplace_id, emis_le, emis_par)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                remplace_id, emis_le, emis_par, groupe_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             id,
             contenu.type_document,
@@ -294,7 +410,8 @@ fn inserer(
             empreinte,
             remplace_id,
             a.horodatage(),
-            a.utilisateur_id
+            a.utilisateur_id,
+            groupe_id
         ],
     )?;
     let doc =
@@ -310,8 +427,9 @@ fn inserer(
         Some(&json!({
             "numero": doc.numero,
             "type": contenu.type_document,
-            "montant": contenu.paiement.as_ref().map(|p| p.montant).unwrap_or(contenu.sejour.prix_total),
+            "montant": contenu.paiement.as_ref().map(|p| p.montant).unwrap_or(contenu.prix_hebergement()),
             "remplace": doc.remplace_numero,
+            "groupe": groupe_id,
         })),
     )?;
     Ok(doc)
@@ -338,6 +456,15 @@ fn horaire(a: &Acteur, decalage: Duration) -> (NaiveDate, String) {
 // ───────────────────────────── Services ─────────────────────────────
 
 impl Tanana {
+    /// Dessine le PDF, avec le logo que le document avait à son émission.
+    fn rendre_document(&mut self, contenu: &ContenuDocument, duplicata: bool) -> Resultat<Vec<u8>> {
+        let octets = match &contenu.hotel.logo {
+            Some(l) => crate::services::logo::octets_logo(self.conn_brute(), &l.empreinte)?,
+            None => None,
+        };
+        pdf::rendre_avec_logo(contenu, duplicata, octets.as_deref())
+    }
+
     /// Reçu d'un paiement (encaissement ou remboursement). Le premier appel
     /// l'émet ; les suivants redonnent le même reçu, marqué « Duplicata ».
     pub fn imprimer_recu(
@@ -384,12 +511,15 @@ impl Tanana {
                 total_paye,
                 taxes: Some(b.taxes).filter(|t| !t.lignes.is_empty()),
                 remplace: None,
+                chambres: b.chambres,
+                groupe: b.groupe.as_ref().and_then(|(_, n)| n.clone()),
             };
             let emp = empreinte(&contenu)?;
-            let doc = inserer(tx, a, &contenu, sequence, &reservation_id, Some(paiement_id), &emp, None)?;
+            let groupe_id = b.groupe.as_ref().map(|(id, _)| id.as_str());
+            let doc = inserer(tx, a, &contenu, sequence, &reservation_id, Some(paiement_id), &emp, None, groupe_id)?;
             Ok((doc, contenu, false))
         })?;
-        let pdf = pdf::rendre(&contenu, duplicata)?;
+        let pdf = self.rendre_document(&contenu, duplicata)?;
         Ok(DocumentImprime { document, duplicata, contenu, pdf })
     }
 
@@ -413,11 +543,16 @@ impl Tanana {
             // Ce qui fait qu'une facture est « la même » : client, séjour, paiements.
             let taxes = Some(b.taxes).filter(|t| !t.lignes.is_empty());
             // (sans taxes, même empreinte qu'avant leur arrivée : pas de facture de remplacement inutile)
-            let emp = match &taxes {
-                None => empreinte(&json!([b.client, b.sejour, paiements]))?,
-                Some(t) => empreinte(&json!([b.client, b.sejour, paiements, t]))?,
+            let groupe_id = b.groupe.as_ref().map(|(id, _)| id.clone());
+            let emp = match (&taxes, &groupe_id) {
+                (None, None) => empreinte(&json!([b.client, b.sejour, paiements]))?,
+                (Some(t), None) => empreinte(&json!([b.client, b.sejour, paiements, t]))?,
+                (t, Some(_)) => empreinte(&json!([b.client, b.chambres, paiements, t, b.groupe]))?,
             };
-            let precedente = lire_document(tx, "d.type = 'facture' AND d.reservation_id = ?1", reservation_id)?;
+            let precedente = match &groupe_id {
+                Some(g) => lire_document(tx, "d.type = 'facture' AND d.groupe_id = ?1", g)?,
+                None => lire_document(tx, "d.type = 'facture' AND d.reservation_id = ?1 AND d.groupe_id IS NULL", reservation_id)?,
+            };
             if let Some((doc, contenu, emp_precedente)) = &precedente
                 && *emp_precedente == emp
             {
@@ -436,19 +571,23 @@ impl Tanana {
                 heure,
                 emis_par: a.nom.clone(),
                 client: b.client,
-                reste: taxes.as_ref().map_or(b.sejour.prix_total, |t| t.total_a_payer) - total_paye,
+                reste: 0,
                 sejour: b.sejour,
                 paiement: None,
                 paiements,
                 total_paye,
                 taxes,
                 remplace: precedente.as_ref().map(|(d, _, _)| d.numero.clone()),
+                chambres: b.chambres,
+                groupe: b.groupe.as_ref().and_then(|(_, n)| n.clone()),
             };
+            let contenu = ContenuDocument { reste: contenu.total_a_payer() - total_paye, ..contenu };
             let remplace_id = precedente.as_ref().map(|(d, _, _)| d.id.as_str());
-            let doc = inserer(tx, a, &contenu, sequence, reservation_id, None, &emp, remplace_id)?;
+            let doc =
+                inserer(tx, a, &contenu, sequence, reservation_id, None, &emp, remplace_id, groupe_id.as_deref())?;
             Ok((doc, contenu, false))
         })?;
-        let pdf = pdf::rendre(&contenu, duplicata)?;
+        let pdf = self.rendre_document(&contenu, duplicata)?;
         Ok(DocumentImprime { document, duplicata, contenu, pdf })
     }
 
@@ -457,7 +596,9 @@ impl Tanana {
         self.executer(token, Some(Permission::ReservationVoir), |tx, _| {
             let mut stmt = tx.prepare(&format!(
                 "SELECT {COLONNES_DOCUMENT} {DEPUIS_DOCUMENTS}
-                 WHERE d.reservation_id = ?1 ORDER BY d.emis_le DESC, d.numero DESC"
+                 WHERE d.reservation_id = ?1
+                    OR d.groupe_id = (SELECT groupe_id FROM reservations WHERE id = ?1)
+                 ORDER BY d.emis_le DESC, d.numero DESC"
             ))?;
             let v = stmt.query_map([reservation_id], ligne_document)?.collect::<Result<Vec<_>, _>>()?;
             Ok(v)

@@ -8,7 +8,7 @@ import { Alerte, Bouton, Carte, EnTete } from "../../components/ui";
 import { api } from "../../lib/api";
 import { ajouterJours, enTeteJour, formatJourLong, formatJourMoyen, formatSejour, joursEntre, plage } from "../../lib/dates";
 import { versErreur } from "../../lib/erreurs";
-import { aujourdhui, formatMontant, type Devise } from "../../lib/format";
+import { aujourdhui, formatMontant, resteDe, type Devise } from "../../lib/format";
 import { LIBELLE_STATUT_RESERVATION } from "../../lib/libelles";
 import { useDevise, useSession } from "../../lib/session";
 
@@ -20,9 +20,12 @@ const STYLE_STATUT: Record<Exclude<StatutReservation, "annulee">, string> = {
 };
 
 function resumePaiement(r: Reservation, devise: Devise): string {
-  if (r.solde > 0) return `Reste ${formatMontant(r.solde, devise)}`;
-  if (r.solde < 0) return "Trop payé";
-  return "Payé ✓";
+  // Chambre d'un groupe : un seul compte pour tout le groupe.
+  const groupe = r.solde_groupe !== null;
+  const reste = resteDe(r);
+  if (reste > 0) return `${groupe ? "Groupe : reste" : "Reste"} ${formatMontant(reste, devise)}`;
+  if (reste < 0) return groupe ? "Groupe : trop payé" : "Trop payé";
+  return groupe ? "Groupe payé ✓" : "Payé ✓";
 }
 
 export function Tableau({

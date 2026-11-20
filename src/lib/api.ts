@@ -23,9 +23,13 @@ import type { EtatApplication } from "../bindings/EtatApplication";
 import type { EtatCopie } from "../bindings/EtatCopie";
 import type { EtatDistance } from "../bindings/EtatDistance";
 import type { InfosMiseAJour } from "../bindings/InfosMiseAJour";
+import type { Logo } from "../bindings/Logo";
 import type { FiltreJournal } from "../bindings/FiltreJournal";
+import type { Groupe } from "../bindings/Groupe";
 import type { ModePaiement } from "../bindings/ModePaiement";
 import type { ModificationReservation } from "../bindings/ModificationReservation";
+import type { NouveauGroupe } from "../bindings/NouveauGroupe";
+import type { NouveauLogo } from "../bindings/NouveauLogo";
 import type { NouveauTypeChambre } from "../bindings/NouveauTypeChambre";
 import type { NouvelleDepense } from "../bindings/NouvelleDepense";
 import type { NouvelleReservation } from "../bindings/NouvelleReservation";
@@ -178,6 +182,11 @@ export const api = {
   chambresDisponibles: (arrivee: string, depart: string) =>
     appelConnecte<Chambre[]>("chambres_disponibles", { arrivee, depart }),
   creerReservation: (donnees: NouvelleReservation) => appelConnecte<Reservation>("creer_reservation", { donnees }),
+  /** Plusieurs chambres pour un même client : un seul compte, une seule facture. */
+  creerGroupe: (donnees: NouveauGroupe) => appelConnecte<Groupe>("creer_groupe", { donnees }),
+  obtenirGroupe: (id: string) => appelConnecte<Groupe>("obtenir_groupe", { id }),
+  ajouterAuGroupe: (groupe_id: string, chambre_id: string, prix_total: number | null) =>
+    appelConnecte<Groupe>("ajouter_au_groupe", { groupe_id, chambre_id, prix_total }),
   modifierReservation: (id: string, donnees: ModificationReservation) =>
     appelConnecte<Reservation>("modifier_reservation", { id, donnees }),
   annulerReservation: (id: string, motif: string) => appelConnecte<Reservation>("annuler_reservation", { id, motif }),
@@ -254,6 +263,9 @@ export const api = {
   // Système
   parametres: () => appelConnecte<Parametres>("parametres"),
   modifierParametres: (donnees: Parametres) => appelConnecte<Parametres>("modifier_parametres", { donnees }),
+  logoHotel: () => appelConnecte<Logo | null>("logo_hotel"),
+  /** `null` retire le logo. */
+  definirLogo: (image: NouveauLogo | null) => appelConnecte<Logo | null>("definir_logo", { image }),
   sauvegarderVers: (chemin: string) => appelConnecte<null>("sauvegarder_vers", { chemin }),
   exporterCleBase: (mot_de_passe: string) => appelConnecte<string | null>("exporter_cle_base", { mot_de_passe }),
 };

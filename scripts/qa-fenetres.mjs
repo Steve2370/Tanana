@@ -41,6 +41,39 @@ const ECRANS = [
   "Réglages",
   "Mon compte (mot de passe, PIN)",
 ];
+/**
+ * Parcours : des états qu'on n'atteint pas d'un seul clic dans le menu.
+ * Chaque étape est exécutée dans la page ; `cliquer(texte)` clique le premier
+ * bouton (ou case) dont le nom accessible commence par ce texte.
+ */
+const PARCOURS = [
+  {
+    nom: "Nouvelle réservation de groupe (2 chambres, prix convenus)",
+    etapes: [
+      'menu("Accueil")',
+      'menu("Réservations")',
+      'cliquer("Nouvelle réservation")',
+      'cocher(/Chambre 101/)',
+      'cocher(/Chambre 102/)',
+      'cocher(/Appliquer un autre prix/)',
+    ],
+  },
+  {
+    nom: "Fiche d'une chambre de groupe",
+    etapes: ['menu("Accueil")', 'menu("Réservations")', 'cliquer("Mbarga Aline, chambre 102")'],
+  },
+  {
+    nom: "Ajouter une chambre au groupe",
+    etapes: ['menu("Accueil")', 'menu("Réservations")', 'cliquer("Mbarga Aline, chambre 102")', 'cliquer("Ajouter une chambre")'],
+  },
+];
+/** Aides disponibles dans les étapes des parcours. */
+const AIDES = `
+  const nomDe = (e) => (e.getAttribute("aria-label") || e.textContent || "").trim().replace(/\\s+/g, " ");
+  const menu = (t) => [...document.querySelector('nav[aria-label="Menu principal"]').querySelectorAll("button")].find((b) => nomDe(b) === t).click();
+  const cliquer = (t) => { const b = [...document.querySelectorAll("button")].find((b) => nomDe(b).startsWith(t)); if (!b) throw new Error("bouton introuvable : " + t); b.click(); };
+  const cocher = (re) => { const l = [...document.querySelectorAll("label")].find((l) => re.test(l.textContent)); if (!l) throw new Error("case introuvable : " + re); l.click(); };
+`;
 const NOM_LONG = "Hôtel Résidence Internationale du Grand Lac de Kribi et des Chutes de la Lobé";
 
 const CHROMES = [process.env.CHROME, "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser",
@@ -170,6 +203,25 @@ async function principal() {
               writeFileSync(join(captures, `${ecran.split(" ")[0]}-${largeur}-${texte * 100}${nom === NOM_LONG ? "-long" : ""}.png`), Buffer.from(data, "base64"));
             }
           }
+          for (const [i, p] of PARCOURS.entries()) {
+            const ou = `${p.nom} · ${largeur}×${hauteur} · texte ${texte * 100} %${nom === NOM_LONG ? " · nom d'hôtel long" : ""}`;
+            try {
+              for (const etape of p.etapes) {
+                await evaluer(`(() => { ${AIDES}; ${etape}; })()`);
+                await attendre(500);
+              }
+            } catch (e) {
+              constats.push(`${ou} : parcours impossible (${e.message.split("\n")[0]})`);
+              continue;
+            }
+            const defauts = await evaluer(`(${relever.toString()})()`);
+            for (const d of defauts) constats.push(`${ou} : ${d}`);
+            if (captures && (defauts.length || process.env.QA_TOUT)) {
+              await evaluer(`document.querySelector("main")?.scrollTo(0, 0)`);
+              const { data } = await c.envoyer("Page.captureScreenshot", { format: "png" });
+              writeFileSync(join(captures, `parcours${i + 1}-${largeur}-${texte * 100}${nom === NOM_LONG ? "-long" : ""}.png`), Buffer.from(data, "base64"));
+            }
+          }
         }
       }
     }
@@ -180,8 +232,10 @@ async function principal() {
   }
   const uniques = [...new Set(erreurs)];
   for (const e of uniques) constats.push(`erreur JavaScript : ${e}`);
-  const essais = 2 * FENETRES.length * TEXTES.length * ECRANS.length;
-  console.log(`\n${essais} écrans vérifiés (${ECRANS.length} écrans × ${FENETRES.length} fenêtres × ${TEXTES.length} tailles de texte × 2 noms d'hôtel)`);
+  const essais = 2 * FENETRES.length * TEXTES.length * (ECRANS.length + PARCOURS.length);
+  console.log(
+    `\n${essais} écrans vérifiés (${ECRANS.length} écrans et ${PARCOURS.length} parcours × ${FENETRES.length} fenêtres × ${TEXTES.length} tailles de texte × 2 noms d'hôtel)`,
+  );
   if (constats.length === 0) {
     console.log("Aucun défaut.");
     return;

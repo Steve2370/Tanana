@@ -58,6 +58,8 @@ export function resa(p: Partial<Reservation> = {}): Reservation {
     total_encaisse: 0,
     solde: 75_000,
     statut: "confirmee",
+    groupe_id: null,
+    solde_groupe: null,
     notes: null,
     cree_le: "2026-03-10T14:00:00.000Z",
     ...p,

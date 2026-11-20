@@ -84,7 +84,10 @@ describe("Réglages › Consultation à distance (côté hôtel)", () => {
     await userEvent.type(await screen.findByLabelText("Code d'invitation (facultatif)"), " BIENVENUE ");
     await userEvent.type(screen.getByLabelText("Adresse du serveur"), "https://relais.test");
     await userEvent.click(screen.getByRole("button", { name: "Activer la consultation à distance" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("refuse la demande (code d'invitation inconnu)");
+    const alerte = await screen.findByRole("alert");
+    expect(alerte).toHaveTextContent("Le code d'invitation n'est pas accepté par le serveur");
+    expect(alerte).not.toHaveTextContent("identifiant"); // l'hôtel n'en a pas encore
+    expect(screen.getByLabelText("Code d'invitation (facultatif)")).toHaveValue(" BIENVENUE "); // rien n'est effacé
     expect(appelsDe(appels, "activer_distance")[0]?.args).toMatchObject({ code_invitation: "BIENVENUE" });
   });
 

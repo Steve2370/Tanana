@@ -76,6 +76,19 @@ export interface ReservationVue {
   statut: Statut;
   notes: string | null;
   cree_le: string;
+  /** Chambre d'une réservation de groupe : le compte commun du groupe. */
+  groupe: CompteGroupe | null;
+}
+
+/** Un groupe : plusieurs chambres, un seul compte (comme Tanana : groupe() dans reservations.rs). */
+export interface CompteGroupe {
+  id: string;
+  nom: string | null;
+  /** Chambres non annulées */
+  chambres: number;
+  total_a_payer: number;
+  total_encaisse: number;
+  solde: number;
 }
 
 const jours = (debut: string, fin: string) => Math.round((Date.parse(`${fin}T00:00:00Z`) - Date.parse(`${debut}T00:00:00Z`)) / 86_400_000);
@@ -124,13 +137,35 @@ export function reservations(copie: Copie): ReservationVue[] {
         statut: texte(r.statut) as Statut,
         notes: texteOuNul(r.notes),
         cree_le: texte(r.cree_le),
+        groupe: texteOuNul(r.groupe_id) ? ({ id: texte(r.groupe_id) } as CompteGroupe) : null,
       };
     })
+    .map((r, _, toutes) => (r.groupe ? { ...r, groupe: compteGroupe(copie, r.groupe.id, toutes) } : r))
     .sort(
       (a, b) =>
         a.chambre_numero.toLowerCase().localeCompare(b.chambre_numero.toLowerCase(), "fr", { numeric: true }) ||
         a.date_arrivee.localeCompare(b.date_arrivee),
     );
+}
+
+function compteGroupe(copie: Copie, id: string, toutes: ReservationVue[]): CompteGroupe {
+  const chambres = toutes.filter((r) => r.groupe?.id === id);
+  const actives = chambres.filter((r) => r.statut !== "annulee");
+  const total = actives.reduce((t, r) => t + r.total_a_payer, 0);
+  const paye = chambres.reduce((t, r) => t + r.total_encaisse, 0);
+  const ligne = copie.lignes("groupes").find((g) => texte(g.id) === id);
+  return { id, nom: ligne ? texteOuNul(ligne.nom) : null, chambres: actives.length, total_a_payer: total, total_encaisse: paye, solde: total - paye };
+}
+
+/** Reste à payer de séjours : chaque groupe n'est compté qu'une fois. */
+export function resteDe(liste: ReservationVue[]): number {
+  const groupes = new Map<string, number>();
+  let reste = 0;
+  for (const r of liste) {
+    if (r.groupe) groupes.set(r.groupe.id, Math.max(0, r.groupe.solde));
+    else reste += Math.max(0, r.solde);
+  }
+  return reste + [...groupes.values()].reduce((a, b) => a + b, 0);
 }
 
 /** Séjours non annulés qui touchent la période [debut, fin[ (comme le planning de Tanana). */
@@ -185,7 +220,7 @@ export function journee(copie: Copie, toutes: ReservationVue[], jour: string): J
     arrivees,
     departs,
     presents,
-    resteAEncaisser: presents.reduce((s, r) => s + Math.max(0, r.solde), 0),
+    resteAEncaisser: resteDe(presents),
   };
 }
 

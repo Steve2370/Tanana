@@ -13,12 +13,14 @@ compile_error!("Activer la feature `chiffrement` (recommandé) ou `sans-chiffrem
 
 /// Les migrations sont embarquées dans le binaire. On n'en modifie JAMAIS une
 /// déjà livrée : on en ajoute une nouvelle (0002_..., 0003_...).
-const MIGRATIONS: [&str; 5] = [
+const MIGRATIONS: [&str; 7] = [
     include_str!("../migrations/0001_initial.sql"),
     include_str!("../migrations/0002_annulation_depenses.sql"),
     include_str!("../migrations/0003_documents.sql"),
     include_str!("../migrations/0004_taxes.sql"),
     include_str!("../migrations/0005_consultation_distance.sql"),
+    include_str!("../migrations/0006_logo.sql"),
+    include_str!("../migrations/0007_groupes.sql"),
 ];
 
 /// Version de la structure de la base que connaît cette version de Tanana

@@ -8,8 +8,8 @@ use crate::domaine::{
 };
 use crate::erreur::{Erreur, Resultat};
 use crate::modeles::{
-    Chambre, ModificationReservation, NouvelleReservation, Reservation, StatutChambre, StatutReservation, Taxe,
-    TypePaiement,
+    Chambre, Groupe, ModificationReservation, NouveauGroupe, NouvelleReservation, Reservation, StatutChambre,
+    StatutReservation, Taxe, TypePaiement,
 };
 use crate::permissions::Permission;
 use crate::services::chambres::chambre;
@@ -18,7 +18,7 @@ use crate::{Tanana, nouvel_id};
 
 const SELECT_RESERVATION: &str = "SELECT r.id, r.chambre_id, c.numero, r.client_id,
         trim(cl.nom || ' ' || coalesce(cl.prenom, '')), r.date_arrivee, r.date_depart,
-        r.prix_total, r.statut, r.notes, r.cree_le
+        r.prix_total, r.statut, r.notes, r.cree_le, r.groupe_id
      FROM reservations r
      JOIN chambres c ON c.id = r.chambre_id
      JOIN clients cl ON cl.id = r.client_id";
@@ -55,7 +55,38 @@ pub(crate) fn ecrire_taxes(conn: &Connection, reservation_id: &str, taxes: &[Tax
     Ok(())
 }
 
+/// Réservations, avec le reste à payer de leur groupe s'il y en a un.
 fn lire(conn: &Connection, sql_fin: &str, p: impl rusqlite::Params) -> Resultat<Vec<Reservation>> {
+    let mut v = lire_brut(conn, sql_fin, p)?;
+    let mut soldes: std::collections::HashMap<String, i64> = Default::default();
+    for r in &mut v {
+        if let Some(g) = &r.groupe_id {
+            let solde = match soldes.get(g) {
+                Some(s) => *s,
+                None => {
+                    let s = solde_du_groupe(&lire_brut(conn, "WHERE r.groupe_id = ?1", [g])?);
+                    soldes.insert(g.clone(), s);
+                    s
+                }
+            };
+            r.solde_groupe = Some(solde);
+        }
+    }
+    Ok(v)
+}
+
+/// (à payer pour les chambres non annulées, encaissé net sur toutes les chambres)
+fn totaux_du_groupe(chambres: &[Reservation]) -> (i64, i64) {
+    let total = chambres.iter().filter(|r| r.statut != StatutReservation::Annulee).map(|r| r.total_a_payer).sum();
+    (total, chambres.iter().map(|r| r.total_encaisse).sum())
+}
+
+fn solde_du_groupe(chambres: &[Reservation]) -> i64 {
+    let (total, encaisse) = totaux_du_groupe(chambres);
+    total - encaisse
+}
+
+fn lire_brut(conn: &Connection, sql_fin: &str, p: impl rusqlite::Params) -> Resultat<Vec<Reservation>> {
     let mut stmt = conn.prepare(&format!("{SELECT_RESERVATION} {sql_fin}"))?;
     let bruts = stmt
         .query_map(p, |r| {
@@ -71,13 +102,14 @@ fn lire(conn: &Connection, sql_fin: &str, p: impl rusqlite::Params) -> Resultat<
                 r.get::<_, StatutReservation>(8)?,
                 r.get::<_, Option<String>>(9)?,
                 r.get::<_, String>(10)?,
+                r.get::<_, Option<String>>(11)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     bruts
         .into_iter()
         .map(
-            |(id, chambre_id, chambre_numero, client_id, client_nom, arrivee, depart, prix, statut, notes, cree_le)| {
+            |(id, chambre_id, chambre_numero, client_id, client_nom, arrivee, depart, prix, statut, notes, cree_le, groupe_id)| {
                 let nuits = (depart - arrivee).num_days();
                 let encaisse = total_encaisse(&paiements_de(conn, &id)?);
                 let taxes = calculer_taxes(prix, nuits, &taxes_de(conn, &id)?);
@@ -98,6 +130,8 @@ fn lire(conn: &Connection, sql_fin: &str, p: impl rusqlite::Params) -> Resultat<
                     statut,
                     notes,
                     cree_le,
+                    groupe_id,
+                    solde_groupe: None,
                 })
             },
         )
@@ -106,6 +140,115 @@ fn lire(conn: &Connection, sql_fin: &str, p: impl rusqlite::Params) -> Resultat<
 
 pub(crate) fn reservation(conn: &Connection, id: &str) -> Resultat<Reservation> {
     lire(conn, "WHERE r.id = ?1", [id])?.pop().ok_or_else(|| Erreur::Introuvable("réservation".into()))
+}
+
+/// Un groupe, ses chambres et son compte.
+pub(crate) fn groupe(conn: &Connection, id: &str) -> Resultat<Groupe> {
+    let (nom, client_id, client_nom, cree_le) = conn
+        .query_row(
+            "SELECT g.nom, g.client_id, trim(cl.nom || ' ' || coalesce(cl.prenom, '')), g.cree_le
+             FROM groupes g JOIN clients cl ON cl.id = g.client_id WHERE g.id = ?1",
+            [id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Erreur::Introuvable("groupe".into()))?;
+    let reservations = lire(conn, "WHERE r.groupe_id = ?1 ORDER BY length(c.numero), c.numero, r.cree_le", [id])?;
+    let (total_a_payer, total_encaisse) = totaux_du_groupe(&reservations);
+    Ok(Groupe {
+        id: id.to_string(),
+        nom,
+        client_id,
+        client_nom,
+        reservations,
+        total_a_payer,
+        total_encaisse,
+        solde: total_a_payer - total_encaisse,
+        cree_le,
+    })
+}
+
+/// Le compte qui compte pour une réservation : (reste à payer, encaissé net).
+/// Pour une chambre d'un groupe, c'est celui du groupe entier.
+pub(crate) fn compte(conn: &Connection, r: &Reservation) -> Resultat<(i64, i64)> {
+    match &r.groupe_id {
+        Some(g) => {
+            let g = groupe(conn, g)?;
+            Ok((g.solde, g.total_encaisse))
+        }
+        None => Ok((r.solde, r.total_encaisse)),
+    }
+}
+
+/// Enregistre une chambre réservée (seule ou dans un groupe) avec les taxes habituelles.
+#[allow(clippy::too_many_arguments)]
+fn inserer_reservation(
+    tx: &Connection,
+    a: &crate::Acteur,
+    chambre_id: &str,
+    client_id: &str,
+    arrivee: NaiveDate,
+    depart: NaiveDate,
+    prix_total: Option<i64>,
+    notes: Option<String>,
+    groupe_id: Option<&str>,
+) -> Resultat<Reservation> {
+    let nuits = valider_sejour(arrivee, depart)?;
+    let ch = chambre(tx, chambre_id)?;
+    // Vérification explicite pour un message clair ; le trigger SQL reste
+    // le garde-fou final. La transaction IMMEDIATE empêche deux postes
+    // d'écrire en même temps.
+    verifier_disponibilite(tx, &ch, arrivee, depart, None)?;
+    let prix = match prix_total {
+        Some(p) if p < 0 => return Err(Erreur::MontantInvalide("prix total négatif".into())),
+        Some(p) => p,
+        None => prix_sejour(ch.prix_nuit_defaut, nuits)?,
+    };
+    let id = nouvel_id();
+    tx.execute(
+        "INSERT INTO reservations
+           (id, chambre_id, client_id, date_arrivee, date_depart, prix_total, statut, notes, cree_le, cree_par, groupe_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'confirmee', ?7, ?8, ?9, ?10)",
+        params![
+            id,
+            chambre_id,
+            client_id,
+            arrivee,
+            depart,
+            prix,
+            texte_facultatif(notes),
+            a.horodatage(),
+            a.utilisateur_id,
+            groupe_id
+        ],
+    )?;
+    // Les taxes habituelles de l'hôtel s'appliquent ; elles restent modifiables ensuite.
+    let taxes = crate::services::taxes::taxes_hotel_de(tx)?;
+    crate::domaine::verifier_taxes_comprises(prix, nuits, &taxes)?;
+    ecrire_taxes(tx, &id, &taxes)?;
+    let r = reservation(tx, &id)?;
+    audit::ecrire(
+        tx,
+        &a.horodatage(),
+        Some(&a.utilisateur_id),
+        "reservation.creation",
+        Some("reservation"),
+        Some(&id),
+        None,
+        Some(&en_json(&r)?),
+    )?;
+    Ok(r)
+}
+
+/// Résumé d'un groupe pour le journal (sans le détail de chaque chambre).
+fn resume_groupe(g: &Groupe) -> serde_json::Value {
+    json!({
+        "nom": g.nom,
+        "client": g.client_nom,
+        "chambres": g.reservations.iter().filter(|r| r.statut != StatutReservation::Annulee)
+            .map(|r| r.chambre_numero.clone()).collect::<Vec<_>>(),
+        "total_a_payer": g.total_a_payer,
+    })
 }
 
 /// Retourne l'id d'une réservation active qui chevauche la période, s'il y en a une.
@@ -196,52 +339,119 @@ impl Tanana {
 
     pub fn creer_reservation(&mut self, token: &str, d: NouvelleReservation) -> Resultat<Reservation> {
         self.executer(token, Some(Permission::ReservationCreer), |tx, a| {
-            let nuits = valider_sejour(d.date_arrivee, d.date_depart)?;
-            let ch = chambre(tx, &d.chambre_id)?;
             client(tx, &d.client_id)?;
-            // Vérification explicite pour un message clair ; le trigger SQL reste
-            // le garde-fou final. La transaction IMMEDIATE empêche deux postes
-            // d'écrire en même temps.
-            verifier_disponibilite(tx, &ch, d.date_arrivee, d.date_depart, None)?;
-            let prix = match d.prix_total {
-                Some(p) if p < 0 => return Err(Erreur::MontantInvalide("prix total négatif".into())),
-                Some(p) => p,
-                None => prix_sejour(ch.prix_nuit_defaut, nuits)?,
-            };
+            inserer_reservation(
+                tx,
+                a,
+                &d.chambre_id,
+                &d.client_id,
+                d.date_arrivee,
+                d.date_depart,
+                d.prix_total,
+                d.notes,
+                None,
+            )
+        })
+    }
+
+    /// Plusieurs chambres pour un même client, aux mêmes dates : un seul compte, une seule facture.
+    pub fn creer_groupe(&mut self, token: &str, d: NouveauGroupe) -> Resultat<Groupe> {
+        self.executer(token, Some(Permission::ReservationCreer), |tx, a| {
+            if d.chambres.len() < 2 {
+                return Err(Erreur::Validation("un groupe compte au moins deux chambres".into()));
+            }
+            if d.chambres.len() > 200 {
+                return Err(Erreur::Validation("un groupe compte au plus 200 chambres".into()));
+            }
+            let mut vues = std::collections::HashSet::new();
+            if !d.chambres.iter().all(|c| vues.insert(c.chambre_id.as_str())) {
+                return Err(Erreur::Validation("la même chambre est choisie deux fois".into()));
+            }
+            valider_sejour(d.date_arrivee, d.date_depart)?;
+            client(tx, &d.client_id)?;
+            let nom = texte_facultatif(d.nom);
+            if nom.as_ref().is_some_and(|n| n.chars().count() > 80) {
+                return Err(Erreur::Validation("nom du groupe : 80 caractères au plus".into()));
+            }
             let id = nouvel_id();
             tx.execute(
-                "INSERT INTO reservations
-                   (id, chambre_id, client_id, date_arrivee, date_depart, prix_total, statut, notes, cree_le, cree_par)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'confirmee', ?7, ?8, ?9)",
-                params![
-                    id,
-                    d.chambre_id,
-                    d.client_id,
+                "INSERT INTO groupes (id, client_id, nom, cree_le, cree_par) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, d.client_id, nom, a.horodatage(), a.utilisateur_id],
+            )?;
+            for c in &d.chambres {
+                inserer_reservation(
+                    tx,
+                    a,
+                    &c.chambre_id,
+                    &d.client_id,
                     d.date_arrivee,
                     d.date_depart,
-                    prix,
-                    texte_facultatif(d.notes),
-                    a.horodatage(),
-                    a.utilisateur_id
-                ],
-            )?;
-            // Les taxes habituelles de l'hôtel s'appliquent ; elles restent modifiables ensuite.
-            let taxes = crate::services::taxes::taxes_hotel_de(tx)?;
-            crate::domaine::verifier_taxes_comprises(prix, nuits, &taxes)?;
-            ecrire_taxes(tx, &id, &taxes)?;
-            let r = reservation(tx, &id)?;
+                    c.prix_total,
+                    d.notes.clone(),
+                    Some(&id),
+                )?;
+            }
+            let g = groupe(tx, &id)?;
             audit::ecrire(
                 tx,
                 &a.horodatage(),
                 Some(&a.utilisateur_id),
-                "reservation.creation",
-                Some("reservation"),
+                "groupe.creation",
+                Some("groupe"),
                 Some(&id),
                 None,
-                Some(&en_json(&r)?),
+                Some(&resume_groupe(&g)),
             )?;
-            Ok(r)
+            Ok(g)
         })
+    }
+
+    /// Ajoute une chambre à un groupe, aux dates du groupe.
+    pub fn ajouter_au_groupe(
+        &mut self,
+        token: &str,
+        groupe_id: &str,
+        chambre_id: &str,
+        prix_total: Option<i64>,
+    ) -> Resultat<Groupe> {
+        self.executer(token, Some(Permission::ReservationCreer), |tx, a| {
+            let avant = groupe(tx, groupe_id)?;
+            let modele = avant
+                .reservations
+                .iter()
+                .find(|r| r.statut != StatutReservation::Annulee)
+                .ok_or_else(|| Erreur::Validation("toutes les chambres de ce groupe sont annulées".into()))?;
+            if avant.reservations.iter().all(|r| r.statut == StatutReservation::Partie || r.statut == StatutReservation::Annulee) {
+                return Err(Erreur::Validation("ce groupe est déjà parti".into()));
+            }
+            inserer_reservation(
+                tx,
+                a,
+                chambre_id,
+                &avant.client_id,
+                modele.date_arrivee,
+                modele.date_depart,
+                prix_total,
+                modele.notes.clone(),
+                Some(groupe_id),
+            )?;
+            let apres = groupe(tx, groupe_id)?;
+            audit::ecrire(
+                tx,
+                &a.horodatage(),
+                Some(&a.utilisateur_id),
+                "groupe.ajout",
+                Some("groupe"),
+                Some(groupe_id),
+                Some(&resume_groupe(&avant)),
+                Some(&resume_groupe(&apres)),
+            )?;
+            Ok(apres)
+        })
+    }
+
+    pub fn obtenir_groupe(&mut self, token: &str, id: &str) -> Resultat<Groupe> {
+        self.executer(token, Some(Permission::ReservationVoir), |tx, _| groupe(tx, id))
     }
 
     /// Change la chambre, les dates ou le prix d'une réservation (action sensible).
@@ -309,8 +519,10 @@ impl Tanana {
     pub fn enregistrer_depart(&mut self, token: &str, id: &str) -> Resultat<Reservation> {
         self.executer(token, Some(Permission::SejourGerer), |tx, a| {
             let r = reservation(tx, id)?;
-            if r.statut == StatutReservation::Arrivee && r.solde > 0 {
-                return Err(Erreur::SoldeImpaye { montant: r.solde });
+            // Dans un groupe, c'est le reste à payer du groupe entier qui compte.
+            let (reste, _) = compte(tx, &r)?;
+            if r.statut == StatutReservation::Arrivee && reste > 0 {
+                return Err(Erreur::SoldeImpaye { montant: reste });
             }
             changer_statut(tx, a, id, StatutReservation::Partie, "sejour.depart", None)
         })

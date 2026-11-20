@@ -8,12 +8,12 @@ import { Alerte, Bouton, Carte, Champ, EnTete, Pastille } from "../../components
 import { api } from "../../lib/api";
 import { formatSejour, pluriel } from "../../lib/dates";
 import { versErreur } from "../../lib/erreurs";
-import { formatHorodatage, formatMontant } from "../../lib/format";
+import { formatHorodatage, formatMontant, resteDe, resteDesSejours } from "../../lib/format";
 import { LIBELLE_STATUT_RESERVATION } from "../../lib/libelles";
 import { useDevise, useSession } from "../../lib/session";
 import { nomComplet } from "../reservations/ChoixClient";
 import { FicheReservation } from "../reservations/FicheReservation";
-import { NouvelleReservation } from "../reservations/NouvelleReservation";
+import { messageCreation, NouvelleReservation } from "../reservations/NouvelleReservation";
 import { donneesDe, FormulaireClient } from "./FormulaireClient";
 
 /** Nombre maximum de clients renvoyés par une recherche (voir le service Rust). */
@@ -55,6 +55,7 @@ export function Clients() {
         messageInitial={vue.message}
         libelleRetour="Retour à la fiche du client"
         onRetour={() => setVue({ type: "fiche", id: vue.clientId })}
+        onOuvrir={(reservationId) => setVue({ type: "reservation", clientId: vue.clientId, reservationId })}
       />
     );
   } else if (vue.type === "reserver") {
@@ -63,13 +64,8 @@ export function Clients() {
         clientInitial={vue.client}
         libelleRetour="Retour à la fiche du client"
         onRetour={() => setVue({ type: "fiche", id: vue.client.id })}
-        onCree={(r) =>
-          setVue({
-            type: "reservation",
-            clientId: vue.client.id,
-            reservationId: r.id,
-            message: `La réservation de ${r.client_nom} est enregistrée (chambre ${r.chambre_numero}, ${pluriel(r.nuits, "nuit")}). Si le client verse un acompte, encaissez-le ci-dessous.`,
-          })
+        onCree={(r, chambres) =>
+          setVue({ type: "reservation", clientId: vue.client.id, reservationId: r.id, message: messageCreation(r, chambres) })
         }
       />
     );
@@ -361,7 +357,7 @@ function FicheClient({
 
   const valides = (sejours ?? []).filter((r) => r.statut !== "annulee");
   const totalPaye = (sejours ?? []).reduce((s, r) => s + r.total_encaisse, 0);
-  const resteDu = valides.reduce((s, r) => s + Math.max(0, r.solde), 0);
+  const resteDu = resteDesSejours(valides);
   const m = (montant: number) => formatMontant(montant, devise);
 
   return (
@@ -453,7 +449,11 @@ function FicheClient({
                           </span>
                         </span>
                         <span className="flex flex-wrap items-center gap-2">
-                          {r.statut !== "annulee" && r.solde > 0 && <Pastille ton="alerte">Reste {m(r.solde)}</Pastille>}
+                          {r.statut !== "annulee" && resteDe(r) > 0 && (
+                            <Pastille ton="alerte">
+                              {r.solde_groupe !== null ? "Groupe : reste" : "Reste"} {m(resteDe(r))}
+                            </Pastille>
+                          )}
                           <Pastille ton={r.statut === "annulee" ? "danger" : r.statut === "arrivee" ? "alerte" : r.statut === "confirmee" ? "succes" : "neutre"}>
                             {LIBELLE_STATUT_RESERVATION[r.statut]}
                           </Pastille>

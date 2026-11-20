@@ -16,6 +16,7 @@ const TYPES = [
   { valeur: "", libelle: "Toutes les actions" },
   { valeur: "auth.", libelle: "Connexions" },
   { valeur: "reservation.", libelle: "Réservations" },
+  { valeur: "groupe.", libelle: "Réservations de groupe" },
   { valeur: "sejour.", libelle: "Arrivées et départs" },
   { valeur: "paiement.", libelle: "Paiements" },
   { valeur: "depense.", libelle: "Dépenses" },
@@ -129,6 +130,7 @@ function LigneJournal({ entree: e, ouverte, basculer }: { entree: EntreeJournal;
 type Objet = Record<string, unknown>;
 const estObjet = (v: unknown): v is Objet => typeof v === "object" && v !== null && !Array.isArray(v);
 const lisible = (cle: string) => cle.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+const SANS_GROUPE = new Set(["solde_groupe", "groupe"]);
 /** Valeurs techniques stockées sans accents → mots lisibles. */
 const MOTS: Record<string, string> = {
   desactive: "désactivé",
@@ -145,6 +147,7 @@ const MOTS: Record<string, string> = {
 };
 const valeur = (v: unknown): string => {
   if (v === null || v === undefined || v === "") return "—";
+  if (Array.isArray(v) && v.every((x) => typeof x !== "object")) return v.map(valeur).join(", ");
   if (typeof v === "object") return JSON.stringify(v);
   const texte = String(v);
   return MOTS[texte] ?? texte;
@@ -154,7 +157,10 @@ const valeur = (v: unknown): string => {
 export function Detail({ avant, apres }: { avant: unknown; apres: unknown }) {
   const a = estObjet(avant) ? avant : {};
   const b = estObjet(apres) ? apres : {};
-  const cles = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => k !== "id" && !k.endsWith("_id"));
+  const cles = [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .filter((k) => k !== "id" && !k.endsWith("_id"))
+    // Une chambre seule n'a pas de groupe : inutile d'afficher une ligne vide pour ça.
+    .filter((k) => !(SANS_GROUPE.has(k) && a[k] == null && b[k] == null));
   if (cles.length === 0) return null;
   return (
     <table className="mt-3 mb-1 w-full overflow-hidden rounded-xl bg-sable/60 text-base">

@@ -96,6 +96,22 @@ describe("Tableau des réservations", () => {
     expect(screen.queryByRole("button", { name: caseLibre("101", J) })).not.toBeInTheDocument();
   });
 
+  it("une chambre de groupe montre le reste du groupe, pas celui de la chambre", async () => {
+    // Tout l'acompte est sur la 101 (« trop payé » pour elle seule), le groupe doit encore 40 000
+    simuler({
+      planning: () => [
+        resa({ groupe_id: "g1", total_encaisse: 110_000, solde: -35_000, solde_groupe: 40_000 }),
+        resa({ id: "r2", chambre_id: "c102", chambre_numero: "102", groupe_id: "g1", solde_groupe: 40_000 }),
+      ],
+    });
+    rendreConnecte(<Reservations />);
+    for (const ch of ["101", "102"]) {
+      const barre = await screen.findByRole("button", { name: new RegExp(`Mbarga Aline, chambre ${ch}`) });
+      expect(barre).toHaveAccessibleName(/Groupe : reste 40\s000\sFCFA/);
+      expect(barre).not.toHaveAccessibleName(/Trop payé/);
+    }
+  });
+
   it("sans le droit de réserver, le tableau reste consultable seulement", async () => {
     simuler();
     rendreConnecte(<Reservations />, session(["reservation.voir", "chambre.voir"], { role_id: "role-x" }));

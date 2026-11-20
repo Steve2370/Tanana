@@ -34,4 +34,18 @@ curl https://relais.<domaine>/sante        # doit répondre : ok
 
 Mettre à jour : `cd ~/tanana && git pull && cd crates/tanana-relais/deploiement/vps-partage && docker compose up -d --build`.
 
-Sauvegarde : les données sont dans le volume Docker `tanana_donnees`.
+## Sauvegarde chaque nuit
+
+Les données sont dans le volume Docker `tanana_donnees`. `sauvegarde.sh` en fait
+une copie cohérente (commande `.backup` de SQLite), la vérifie, et garde les
+14 dernières nuits dans `~/sauvegardes-tanana/`. Une seule fois :
+
+```bash
+chmod +x ~/tanana/crates/tanana-relais/deploiement/vps-partage/sauvegarde.sh
+~/tanana/crates/tanana-relais/deploiement/vps-partage/sauvegarde.sh   # essai : « copie relais-AAAA-MM-JJ.db faite »
+(crontab -l 2>/dev/null; echo "30 3 * * * $HOME/tanana/crates/tanana-relais/deploiement/vps-partage/sauvegarde.sh >> $HOME/sauvegardes-tanana/journal.txt 2>&1") | crontab -
+```
+
+Les copies sont chiffrées par les hôtels : sans leurs clés, elles sont illisibles.
+Pour revenir à une copie : `docker compose stop`, remplacer `relais.db` dans le
+volume par la copie, puis `docker compose start`.

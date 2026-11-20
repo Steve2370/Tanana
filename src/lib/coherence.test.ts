@@ -57,7 +57,7 @@ describe("cohérence Rust ↔ TypeScript", () => {
     // Toutes les chaînes « domaine.action » des sources, moins les codes de permission
     const permissions = new Set<string>(TOUTES_PERMISSIONS);
     const actions = new Set(
-      [...sources.matchAll(/"((?:auth|acces|utilisateur|role|type_chambre|chambre|client|reservation|sejour|paiement|depense|document|taxes|parametres|sauvegarde|systeme|distance)\.[a-z_]+)"/g)]
+      [...sources.matchAll(/"((?:auth|acces|utilisateur|role|type_chambre|chambre|client|reservation|groupe|sejour|paiement|depense|document|taxes|parametres|sauvegarde|systeme|distance)\.[a-z_]+)"/g)]
         .map((m) => m[1]!)
         .filter((a) => !permissions.has(a)),
     );

@@ -23,11 +23,21 @@ export function fauxRust(options: { ecrituresEnAttente?: boolean } = {}) {
   const etat = {
     chambres: [...CHAMBRES],
     clients: [MBARGA] as Client[],
-    reservations: [resa(), resa({ id: "r2", chambre_id: "c102", chambre_numero: "102", statut: "arrivee", date_arrivee: J })] as Reservation[],
+    reservations: [
+      resa(),
+      resa({ id: "r2", chambre_id: "c102", chambre_numero: "102", statut: "arrivee", date_arrivee: J, groupe_id: "g1", solde_groupe: 150_000 }),
+      resa({ id: "r3", chambre_id: "c103", chambre_numero: "103", statut: "arrivee", date_arrivee: J, groupe_id: "g1", solde_groupe: 150_000 }),
+    ] as Reservation[],
     depenses: [] as Depense[],
     utilisateurs: [utilisateur(), utilisateur({ id: "u-marie", identifiant: "marie", nom: "Marie", role_id: "role-reception", role_nom: "Réception" })] as Utilisateur[],
     taxes: [{ libelle: "TVA", calcul: "pourcentage", valeur: 1925, comprise: true }] as Taxe[],
     parametres: { ...PARAMETRES },
+  };
+  const groupe = () => {
+    const chambres = etat.reservations.filter((r) => r.groupe_id === "g1");
+    const total = chambres.filter((r) => r.statut !== "annulee").reduce((t, r) => t + r.total_a_payer, 0);
+    const paye = chambres.reduce((t, r) => t + r.total_encaisse, 0);
+    return { id: "g1", nom: "Équipe SOGEA", client_id: "cl1", client_nom: "Mbarga Aline", reservations: chambres, total_a_payer: total, total_encaisse: paye, solde: total - paye, cree_le: `${J}T10:00:00.000Z` };
   };
   const ROLES = [
     { id: "role-admin", nom: "Administrateur", systeme: true, permissions: TOUTES_PERMISSIONS },
@@ -84,6 +94,9 @@ export function fauxRust(options: { ecrituresEnAttente?: boolean } = {}) {
     taxes_reservation: () => detailSimule(75_000, 3, etat.taxes),
     calculer_taxes: ({ prix_total, nuits, taxes }) => detailSimule(Number(prix_total) || 0, Number(nuits) || 1, (taxes as Taxe[]) ?? etat.taxes),
     creer_reservation: ecrire("creer_reservation", () => etat.reservations[0]),
+    creer_groupe: ecrire("creer_groupe", () => groupe()),
+    obtenir_groupe: () => groupe(),
+    ajouter_au_groupe: ecrire("ajouter_au_groupe", () => groupe()),
     modifier_reservation: ecrire("modifier_reservation", () => etat.reservations[0]),
     modifier_taxes_reservation: ecrire("modifier_taxes_reservation", () => etat.reservations[0]),
     annuler_reservation: ecrire("annuler_reservation", () => ({ ...etat.reservations[0], statut: "annulee" })),
@@ -127,6 +140,8 @@ export function fauxRust(options: { ecrituresEnAttente?: boolean } = {}) {
     modifier_parametres: ecrire("modifier_parametres", () => etat.parametres),
     taxes_hotel: () => etat.taxes,
     definir_taxes_hotel: ecrire("definir_taxes_hotel", () => etat.taxes),
+    logo_hotel: () => null,
+    definir_logo: ecrire("definir_logo", () => null),
     sauvegarder_vers: ecrire("sauvegarder_vers", () => null),
     exporter_cle_base: () => "3ad442fb0269ec164acf7f89fce12e84bd2df4482866cdc6c0fef3115fcd3c4f",
     lister_sauvegardes: () => [],

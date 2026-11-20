@@ -1,4 +1,4 @@
-import { aujourdhui, decalageLocal, formatHeure, formatHorodatage, formatJour, formatMontant, lireMontant, saisieMontant } from "./format";
+import { aujourdhui, decalageLocal, formatHeure, formatHorodatage, formatJour, formatMontant, lireMontant, resteDe, resteDesSejours, saisieMontant } from "./format";
 
 /** Intl utilise des espaces insécables : on les normalise pour comparer. */
 const n = (s: string) => s.replace(/[  ]/g, " ");
@@ -81,5 +81,24 @@ describe("dates", () => {
   it("calcule le décalage horaire local (signe inversé de getTimezoneOffset)", () => {
     const d = new Date();
     expect(decalageLocal(d)).toBe(-d.getTimezoneOffset());
+  });
+});
+
+describe("reste dû avec les groupes", () => {
+  const seule = (solde: number) => ({ solde, solde_groupe: null, groupe_id: null });
+  const duGroupe = (id: string, solde: number, solde_groupe: number) => ({ solde, solde_groupe, groupe_id: id });
+
+  it("une chambre de groupe : c'est le reste du groupe qui compte", () => {
+    expect(resteDe(seule(20_000))).toBe(20_000);
+    expect(resteDe(duGroupe("g1", -35_000, 40_000))).toBe(40_000);
+    expect(resteDe(duGroupe("g1", 75_000, 0))).toBe(0);
+  });
+
+  it("plusieurs séjours : chaque groupe une fois, les trop-payés ne retirent rien", () => {
+    expect(resteDesSejours([])).toBe(0);
+    expect(resteDesSejours([seule(20_000), seule(-5_000)])).toBe(20_000);
+    expect(resteDesSejours([duGroupe("g1", -25_000, 50_000), duGroupe("g1", 75_000, 50_000), seule(20_000)])).toBe(70_000);
+    expect(resteDesSejours([duGroupe("g1", 0, 50_000), duGroupe("g2", 0, 30_000)])).toBe(80_000);
+    expect(resteDesSejours([duGroupe("g1", 10_000, -5_000)])).toBe(0);
   });
 });

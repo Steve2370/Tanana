@@ -17,4 +17,13 @@ total_a_payer: number, total_encaisse: number,
 /**
  * Reste à payer : total à payer − encaissé (négatif s'il a trop payé).
  */
-solde: number, statut: StatutReservation, notes: string | null, cree_le: string, };
+solde: number, statut: StatutReservation, notes: string | null, cree_le: string, 
+/**
+ * Réservation de plusieurs chambres : le groupe dont cette chambre fait partie.
+ */
+groupe_id: string | null, 
+/**
+ * Chambre d'un groupe : reste à payer du groupe entier (c'est lui qui compte,
+ * `solde` ne regarde que les paiements enregistrés sur cette chambre).
+ */
+solde_groupe: number | null, };

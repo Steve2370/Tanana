@@ -43,6 +43,18 @@ describe("Menu selon les permissions", () => {
     ]);
   });
 
+  it("une réceptionniste qui encaisse voit l'onglet Caisse (pour y lire qu'elle n'a pas accès aux montants)", async () => {
+    expect(await menu(["chambre.voir", "reservation.voir", "client.voir", "paiement.encaisser"])).toEqual([
+      "Accueil",
+      "Réservations",
+      "Clients",
+      "Chambres",
+      "Caisse",
+      "BeltranMon compte, code PIN",
+      "Se déconnecter",
+    ]);
+  });
+
   it("un gérant avec les dépenses voit la caisse", async () => {
     expect(await menu(["depense.voir"])).toContain("Caisse");
   });
@@ -141,6 +153,14 @@ describe("Historique : détail lisible", () => {
     expect(ligne.className).toContain("bg-or-clair");
     expect(screen.getByText("Notes").closest("tr")!.className).not.toContain("bg-or-clair");
     expect(screen.queryByText("Id")).not.toBeInTheDocument();
+  });
+
+  it("une liste s'affiche en clair, et une chambre seule n'a pas de ligne « groupe » vide", () => {
+    render(<Detail avant={null} apres={{ chambres: ["101", "102"], solde_groupe: null, groupe: null, solde: 5000 }} />);
+    expect(screen.getByText("Chambres").closest("tr")).toHaveTextContent("Chambres101, 102");
+    expect(screen.queryByText("Solde groupe")).not.toBeInTheDocument();
+    expect(screen.queryByText("Groupe")).not.toBeInTheDocument();
+    expect(screen.getByText("Solde")).toBeInTheDocument();
   });
 
   it("traduit les valeurs techniques en mots", () => {

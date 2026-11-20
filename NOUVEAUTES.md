@@ -1,3 +1,5 @@
-- Remettre une copie de sécurité (Réglages, ou au premier lancement sur un nouvel ordinateur).
-- Mises à jour proposées automatiquement aux administrateurs.
-- Consultation à distance de l'hôtel par le propriétaire.
+- Réserver plusieurs chambres pour un même client (équipe, entreprise) : un seul compte, une seule facture avec toutes les chambres.
+- Logo de l'hôtel : en haut à gauche, à côté du nom, et sur les reçus et factures (Réglages › Logo de l'hôtel).
+- Caisse : un employé sans accès aux montants voit un message clair au lieu d'un onglet qui disparaît.
+- Installation Windows en français.
+- Message plus clair quand le code d'invitation de la consultation à distance est refusé.

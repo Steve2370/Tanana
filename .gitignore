@@ -22,3 +22,7 @@ crates/tanana-relais/deploiement/vps-partage/.env
 
 # Page web de consultation construite (npm run build:web)
 dist-web/
+
+# Fichiers locaux (installeurs téléchargés, guides exportés)
+installeurs/
+Guides d'utilisation/

@@ -333,9 +333,12 @@ function ListeSejours({ titre, vide, liste, devise }: { titre: string; vide: str
 }
 
 function ResteDu({ r, devise }: { r: ReservationVue; devise: Devise }) {
-  if (r.solde > 0) return <Pastille ton="alerte">Reste {formatMontant(r.solde, devise)}</Pastille>;
-  if (r.solde < 0) return <Pastille ton="danger">Trop perçu {formatMontant(-r.solde, devise)}</Pastille>;
-  return <Pastille ton="succes">Payé</Pastille>;
+  // Chambre d'un groupe : un seul compte pour tout le groupe.
+  const solde = r.groupe ? r.groupe.solde : r.solde;
+  const qui = r.groupe ? `Groupe${r.groupe.nom ? ` « ${r.groupe.nom} »` : ""} (${r.groupe.chambres} ch.) : ` : "";
+  if (solde > 0) return <Pastille ton="alerte">{qui}Reste {formatMontant(solde, devise)}</Pastille>;
+  if (solde < 0) return <Pastille ton="danger">{qui}Trop perçu {formatMontant(-solde, devise)}</Pastille>;
+  return <Pastille ton="succes">{qui}Payé</Pastille>;
 }
 
 const TON_STATUT = { confirmee: "neutre", arrivee: "succes", partie: "neutre", annulee: "danger" } as const;
