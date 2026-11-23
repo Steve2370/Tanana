@@ -9,6 +9,9 @@ import type { ApercuSauvegarde } from "../bindings/ApercuSauvegarde";
 import type { BilanEnvoi } from "../bindings/BilanEnvoi";
 import type { Chambre } from "../bindings/Chambre";
 import type { CodesDistance } from "../bindings/CodesDistance";
+import type { ConnexionDistante } from "../bindings/ConnexionDistante";
+import type { HotelTrouve } from "../bindings/HotelTrouve";
+import type { LienHotel } from "../bindings/LienHotel";
 import type { Client } from "../bindings/Client";
 import type { ConfigurationInitiale } from "../bindings/ConfigurationInitiale";
 import type { Depense } from "../bindings/Depense";
@@ -76,6 +79,53 @@ export const jetonSession = {
   },
 };
 
+// ─────────────── Travail à distance ───────────────
+// Sur le poste à distance, les modifications partent vers l'ordinateur de
+// l'hôtel (qui les exécute avec la session de la personne) ; tout le reste se
+// lit sur la copie. Même liste que `ENVOYEES_A_L_HOTEL` en Rust (un test
+// vérifie), sans les reçus et factures : Rust les fait faire à l'hôtel lui-même.
+export const ENVOYEES_A_L_HOTEL: ReadonlySet<string> = new Set([
+  "changer_mon_mot_de_passe",
+  "definir_mon_pin",
+  "creer_utilisateur",
+  "changer_role",
+  "changer_statut_utilisateur",
+  "reinitialiser_mot_de_passe",
+  "definir_permission_perso",
+  "creer_role",
+  "modifier_permissions_role",
+  "sessions_actives",
+  "fermer_session",
+  "creer_type_chambre",
+  "modifier_type_chambre",
+  "creer_chambre",
+  "modifier_chambre",
+  "creer_client",
+  "modifier_client",
+  "creer_reservation",
+  "creer_groupe",
+  "ajouter_au_groupe",
+  "modifier_reservation",
+  "annuler_reservation",
+  "enregistrer_arrivee",
+  "enregistrer_depart",
+  "encaisser",
+  "rembourser",
+  "saisir_depense",
+  "annuler_depense",
+  "definir_taxes_hotel",
+  "modifier_taxes_reservation",
+  "modifier_parametres",
+  "definir_logo",
+]);
+
+let modeDistant = false;
+
+/** Cet ordinateur travaille à distance (copie de l'hôtel). Réglé au démarrage. */
+export function definirModeDistant(actif: boolean) {
+  modeDistant = actif;
+}
+
 /** Appelé quand Rust répond « session fermée/expirée » à n'importe quelle commande. */
 export function quandSessionPerdue(f: ((e: ErreurTanana) => void) | null) {
   surSessionPerdue = f;
@@ -96,7 +146,10 @@ async function appelConnecte<T>(commande: string, args: Record<string, unknown> 
     throw e;
   }
   try {
-    const r = await appel<T>(commande, { token: jeton, ...args });
+    const r =
+      modeDistant && ENVOYEES_A_L_HOTEL.has(commande)
+        ? await appel<T>("commande_distante", { token: jeton, commande, args })
+        : await appel<T>(commande, { token: jeton, ...args });
     dernierContact = Date.now();
     return r;
   } catch (e) {
@@ -120,7 +173,19 @@ export const api = {
   // Démarrage
   etatApplication: () => appel<EtatApplication>("etat_application"),
   fournirCle: (cle: string) => appel<null>("fournir_cle", { cle }),
-  initialiser: (configuration: ConfigurationInitiale) => appel<string>("initialiser", { configuration }),
+  /** Crée l'hôtel ; `relais` : serveur auquel il se reliera tout seul dès qu'Internet est là. */
+  initialiser: (configuration: ConfigurationInitiale, relais: string | null = null, code_invitation: string | null = null) =>
+    appel<string>("initialiser", { configuration, relais, code_invitation }),
+  /** « Retrouver mon hôtel », étape 1 : vérifie l'identifiant et le mot de passe auprès du serveur. */
+  retrouverHotel: (adresse: string, identifiant: string, mot_de_passe: string) =>
+    appel<HotelTrouve>("retrouver_hotel", { adresse, identifiant, mot_de_passe }),
+  /** Relier l'hôtel au serveur dès qu'Internet est là (Réglages). */
+  demanderActivationAuto: (relais: string, code_invitation: string | null) =>
+    appelConnecte<null>("demander_activation_auto", { relais, code_invitation }),
+  /** Étape 2 : cet ordinateur devient l'ordinateur de l'hôtel. */
+  confirmerReprise: () => appel<null>("confirmer_reprise"),
+  /** Un autre ordinateur a repris l'hôtel : on met la base de côté (renvoie où). */
+  abandonnerPoste: () => appel<string>("abandonner_poste"),
   recupererAccesAdmin: (code: string, identifiant: string, nouveau_mot_de_passe: string) =>
     appel<string>("recuperer_acces_admin", { code, identifiant, nouveau_mot_de_passe }),
 
@@ -250,12 +315,13 @@ export const api = {
   /** `false` : arrêté ici, mais le serveur n'a pas pu effacer les données (pas d'Internet). */
   desactiverDistance: () => appelConnecte<boolean>("desactiver_distance"),
 
-  // Consultation à distance : côté administrateur (copie en lecture seule)
+  // Travail à distance : le poste de l'administratrice
   /** Renvoie un avertissement si le premier téléchargement n'a pas pu se faire. */
-  consulterHotelDistant: (adresse: string, hotel_id: string, cle_secrete: string, mot_de_passe: string) =>
-    appel<string | null>("consulter_hotel_distant", { adresse, hotel_id, cle_secrete, mot_de_passe }),
-  connexionCopie: (mot_de_passe: string) => appel<SessionOuverte>("connexion_copie", { mot_de_passe }),
-  /** Mot de passe oublié ou clé perdue : on oublie l'hôtel, puis on le rattache avec la clé secrète. */
+  travaillerADistance: (adresse: string, identifiant: string, mot_de_passe: string) =>
+    appel<string | null>("travailler_a_distance", { adresse, identifiant, mot_de_passe }),
+  connexionDistante: (mot_de_passe: string) => appel<ConnexionDistante>("connexion_distante", { mot_de_passe }),
+  lienHotel: () => appelConnecte<LienHotel>("lien_hotel"),
+  /** Mot de passe oublié : on oublie l'hôtel, puis on le rattache avec l'identifiant et le mot de passe. */
   oublierHotelDistant: () => appel<null>("oublier_hotel_distant"),
   etatCopie: () => appelConnecte<EtatCopie>("etat_copie"),
   mettreAJourCopie: () => appelConnecte<number>("mettre_a_jour_copie"),

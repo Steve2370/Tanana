@@ -1,9 +1,22 @@
-# Relais de consultation à distance
+# Relais de Tanana (travail à distance)
 
-Petit serveur qui permet à un administrateur, où qu'il soit, de consulter
-son hôtel. L'hôtel y dépose ses changements **chiffrés de bout en bout** ;
-l'administrateur les télécharge et les déchiffre avec sa clé secrète.
-**Le relais ne peut rien lire** : ni noms, ni montants, ni nom d'hôtel.
+Petit serveur qui permet à un administrateur, où qu'il soit, de suivre **et
+modifier** son hôtel. La base reste sur l'ordinateur de l'hôtel (il marche sans
+Internet) ; le relais ne fait que transmettre des paquets **chiffrés de bout en
+bout**. **Il ne peut rien lire** : ni noms, ni montants, ni mots de passe.
+
+- L'ordinateur de l'hôtel y dépose ses changements, et de temps en temps une
+  copie complète (pour « Retrouver mon hôtel » sur un autre ordinateur).
+- Chaque administrateur a un **coffre** : l'accès à l'hôtel, chiffré avec une clé
+  tirée de son mot de passe. Identifiant + mot de passe suffisent, sur n'importe
+  quel ordinateur. Le relais garde l'empreinte d'une preuve tirée du mot de
+  passe : il refuse un mauvais mot de passe et freine les essais (10 par compte
+  et 30 par adresse en 15 minutes), sans jamais connaître le mot de passe.
+- Une modification faite à distance passe par le relais jusqu'à l'ordinateur
+  de l'hôtel, qui l'exécute et répond. Si l'hôtel ne s'est pas manifesté depuis
+  75 secondes, elle est refusée tout de suite (« hôtel injoignable »).
+- Un seul ordinateur principal à la fois : quand un nouvel ordinateur reprend
+  l'hôtel, l'ancien ne peut plus rien envoyer et l'apprend à son envoi suivant.
 
 ## Page web
 

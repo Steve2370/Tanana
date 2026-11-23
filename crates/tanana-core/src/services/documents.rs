@@ -153,6 +153,32 @@ pub struct DocumentImprime {
     pub pdf: Vec<u8>,
 }
 
+impl DocumentImprime {
+    /// Nom de fichier lisible et valable sur Windows comme sur Mac :
+    /// « R-2026-0001 Mbarga Aline.pdf », « … (duplicata).pdf ».
+    pub fn nom_fichier(&self) -> String {
+        let client: String = self
+            .contenu
+            .client
+            .nom
+            .chars()
+            .map(|c| {
+                if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let client: String = client.chars().take(60).collect();
+        let suffixe = if self.duplicata { " (duplicata)" } else { "" };
+        format!("{} {}{suffixe}.pdf", self.document.numero, client.trim_end_matches('.'))
+    }
+}
+
 // ───────────────────────────── Aides ─────────────────────────────
 
 fn verifier_decalage(decalage_minutes: i32) -> Resultat<Duration> {

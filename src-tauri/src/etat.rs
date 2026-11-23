@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
+use tanana_core::distance::principal::{HotelRetrouve, reprendre_hotel};
+use tanana_core::distance::relais::RelaisHttp;
+use tanana_core::modeles::SessionOuverte;
 use tanana_core::{CleBase, Erreur, Resultat, Tanana};
 use ts_rs::TS;
 
@@ -28,8 +31,10 @@ pub enum StatutDemarrage {
 pub struct EtatApplication {
     pub statut: StatutDemarrage,
     pub initialise: bool,
-    /// Cet ordinateur consulte un hôtel à distance (copie en lecture seule).
+    /// Cet ordinateur travaille à distance (copie de l'hôtel ; les modifications partent vers l'hôtel).
     pub consultation_distance: bool,
+    /// Un autre ordinateur est devenu l'ordinateur principal de l'hôtel.
+    pub poste_remplace: bool,
     pub nom_hotel: Option<String>,
     pub message: Option<String>,
     pub version: String,
@@ -41,8 +46,22 @@ enum Interne {
     Erreur(String),
 }
 
+/// Travail à distance : la session ouverte sur l'ordinateur de l'hôtel. Le
+/// mot de passe reste en mémoire le temps de la session (jamais sur le disque)
+/// pour rouvrir cette session si l'hôtel était injoignable ou l'a fermée.
+#[derive(Default)]
+pub struct LienDistant {
+    pub identifiant: Option<String>,
+    pub mot_de_passe: Option<String>,
+    pub session_hotel: Option<SessionOuverte>,
+}
+
 pub struct Etat {
     interne: Mutex<Interne>,
+    /// Session à distance sur l'ordinateur de l'hôtel (poste à distance seulement).
+    pub distant: Mutex<LienDistant>,
+    /// « Retrouver mon hôtel » : hôtel trouvé, en attente de confirmation.
+    pub retrouve: Mutex<Option<(String, HotelRetrouve)>>,
     pub chemin_base: PathBuf,
     /// Copie d'un hôtel consulté à distance (à la place de la base de l'hôtel).
     pub chemin_copie: PathBuf,
@@ -98,7 +117,86 @@ impl Etat {
     pub fn demarrer(chemin_base: PathBuf, dossier_sauvegardes: PathBuf, coffre: Box<dyn Coffre>) -> Self {
         let chemin_copie = chemin_base.with_file_name("copie-distance.db");
         let interne = ouvrir(&chemin_base, &chemin_copie, coffre.as_ref());
-        Self { interne: Mutex::new(interne), chemin_base, chemin_copie, dossier_sauvegardes, coffre }
+        Self {
+            interne: Mutex::new(interne),
+            distant: Default::default(),
+            retrouve: Default::default(),
+            chemin_base,
+            chemin_copie,
+            dossier_sauvegardes,
+            coffre,
+        }
+    }
+
+    /// Dossier de travail (copies temporaires à chiffrer).
+    pub fn dossier_travail(&self) -> PathBuf {
+        self.chemin_base.parent().map(Path::to_path_buf).unwrap_or_default()
+    }
+
+    /// « Retrouver mon hôtel » : cet ordinateur neuf devient l'ordinateur
+    /// principal et reçoit toute la base. Réseau sous verrou : personne ne
+    /// travaille encore sur cet ordinateur à ce moment-là.
+    pub fn reprendre(&self, adresse: &str, trouve: &HotelRetrouve) -> Resultat<()> {
+        let mut interne = self.interne.lock().map_err(|_| verrou())?;
+        match &*interne {
+            Interne::Prete(t) if t.est_une_copie() => {
+                return Err(Erreur::Validation("cet ordinateur travaille déjà à distance".into()));
+            }
+            Interne::Prete(t) if t.est_initialise()? => return Err(Erreur::DejaInitialise),
+            Interne::Prete(_) => {}
+            _ => return Err(Erreur::NonInitialise),
+        }
+        // La base vide du premier lancement laisse la place
+        *interne = Interne::CleManquante;
+        for suffixe in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffixe}", self.chemin_base.display()));
+        }
+        let ancienne_cle = self.coffre.lire().map_err(Erreur::Base)?;
+        let relais = RelaisHttp::new(adresse)?;
+        let repris = match reprendre_hotel(&relais, adresse, trouve, &self.chemin_base) {
+            Ok(r) => r,
+            Err(e) => {
+                *interne = ouvrir(&self.chemin_base, &self.chemin_copie, self.coffre.as_ref());
+                return Err(e);
+            }
+        };
+        // La clé de la base reçue devient celle de cet ordinateur
+        if let Some(cle) = &repris.cle
+            && Some(cle.en_hex()) != ancienne_cle.as_deref()
+            && let Err(e) = self.coffre.ecrire(cle.en_hex())
+        {
+            drop(repris);
+            for suffixe in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(format!("{}{suffixe}", self.chemin_base.display()));
+            }
+            *interne = ouvrir(&self.chemin_base, &self.chemin_copie, self.coffre.as_ref());
+            return Err(Erreur::Base(e));
+        }
+        *interne = Interne::Prete(Box::new(repris.tanana));
+        log::info!("hôtel repris : cet ordinateur est maintenant l'ordinateur principal");
+        Ok(())
+    }
+
+    /// Un autre ordinateur a pris la place de celui-ci. Sa base est mise de
+    /// côté dans le dossier des copies (rien n'est effacé), et cet ordinateur
+    /// revient au premier lancement, prêt à travailler à distance.
+    pub fn abandonner_poste(&self) -> Resultat<PathBuf> {
+        let mut interne = self.interne.lock().map_err(|_| verrou())?;
+        match &*interne {
+            Interne::Prete(t) if !t.est_une_copie() && t.poste_remplace()? => {}
+            _ => return Err(Erreur::Validation("cet ordinateur est toujours l'ordinateur principal".into())),
+        }
+        let horodatage = chrono::Local::now().format("%Y-%m-%d-%Hh%M%S");
+        std::fs::create_dir_all(&self.dossier_sauvegardes).map_err(|e| Erreur::Base(e.to_string()))?;
+        let garde = self.dossier_sauvegardes.join(format!("tanana-ancien-ordinateur-principal-{horodatage}.db"));
+        *interne = Interne::CleManquante; // base fermée
+        if let Err(e) = deplacer_base(&self.chemin_base, &garde) {
+            *interne = ouvrir(&self.chemin_base, &self.chemin_copie, self.coffre.as_ref());
+            return Err(Erreur::Base(format!("mise de côté de la base : {e}")));
+        }
+        *interne = ouvrir(&self.chemin_base, &self.chemin_copie, self.coffre.as_ref());
+        log::info!("ancienne base de l'hôtel mise de côté : {}", garde.display());
+        Ok(garde)
     }
 
     /// Oublie l'hôtel consulté à distance, pour le rattacher à nouveau (mot de
@@ -176,6 +274,7 @@ impl Etat {
                 statut: StatutDemarrage::Prete,
                 initialise: true,
                 consultation_distance: true,
+                poste_remplace: false,
                 nom_hotel: t.etat_copie().ok().and_then(|e| e.nom_hotel),
                 message: None,
                 version,
@@ -184,6 +283,7 @@ impl Etat {
                 statut: StatutDemarrage::Prete,
                 initialise: t.est_initialise().unwrap_or(false),
                 consultation_distance: false,
+                poste_remplace: t.poste_remplace().unwrap_or(false),
                 nom_hotel: t.nom_hotel().ok().flatten(),
                 message: None,
                 version,
@@ -192,6 +292,7 @@ impl Etat {
                 statut: StatutDemarrage::CleManquante,
                 initialise: true,
                 consultation_distance: self.chemin_copie.exists(),
+                poste_remplace: false,
                 nom_hotel: None,
                 message: None,
                 version,
@@ -200,6 +301,7 @@ impl Etat {
                 statut: StatutDemarrage::Erreur,
                 initialise: false,
                 consultation_distance: false,
+                poste_remplace: false,
                 nom_hotel: None,
                 message: Some(m.clone()),
                 version,

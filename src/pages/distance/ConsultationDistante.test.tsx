@@ -4,10 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { App } from "../../App";
 import type { EtatCopie } from "../../bindings/EtatCopie";
 import type { Permission } from "../../bindings/Permission";
+import { definirModeDistant } from "../../lib/api";
 import { FournisseurSession } from "../../lib/session";
 import { erreurRust, PARAMETRES, session, simulerRust, type Appel, type Gestionnaire } from "../../test/outils";
 
-/** Ce que Rust donne à un poste de consultation (voir PERMISSIONS_DISTANTES). */
+/** Ce que Rust donne au poste à distance quand l'hôtel n'a pas répondu (voir PERMISSIONS_DISTANTES). */
 const PERMISSIONS_DISTANTES: Permission[] = [
   "chambre.voir",
   "client.voir",
@@ -18,26 +19,30 @@ const PERMISSIONS_DISTANTES: Permission[] = [
   "utilisateur.gerer",
 ];
 
-const SESSION_DISTANTE = session(PERMISSIONS_DISTANTES, {
+const SESSION_COPIE = session(PERMISSIONS_DISTANTES, {
   id: "distant",
   identifiant: "distant",
   nom: "Consultation à distance",
   role_id: "distant",
-  role_nom: "Consultation à distance",
+  role_nom: "Lecture seule",
 });
+
+/** L'hôtel a répondu : la vraie session de l'administratrice (tous les droits), sur le jeton de la copie. */
+const SESSION_HOTEL = session(undefined, { nom: "Hanta", identifiant: "hanta" });
 
 const etatApp = (e: object) => ({
   statut: "prete",
   initialise: false,
   consultation_distance: false,
+  poste_remplace: false,
   nom_hotel: null,
   message: null,
-  version: "0.1.0",
+  version: "0.2.0",
   ...e,
 });
 
 const COPIE = (e: Partial<EtatCopie> = {}): EtatCopie => ({
-  relais: "https://relais.test",
+  relais: "https://relais.monkadran.com",
   hotel_id: "HK7Q-F29X",
   nom_hotel: "Hôtel du Lac",
   donnees_du: new Date(Date.now() - 2 * 60_000).toISOString(),
@@ -55,101 +60,131 @@ function demarrer() {
 }
 
 const appelsDe = (appels: Appel[], c: string) => appels.filter((a) => a.commande === c);
-const CLE = "ivng i2wv jnba 4r3c lqu7 zi2e si";
 
-describe("Poste du propriétaire : rattacher l'hôtel", () => {
-  async function remplir(cle = CLE, mdp = "proprio2026", confirmation = mdp) {
-    await userEvent.click(await screen.findByRole("button", { name: "Consulter un hôtel à distance" }));
-    const f = within(screen.getByRole("form", { name: "Consulter un hôtel à distance" }));
-    await userEvent.type(f.getByLabelText("Adresse du serveur"), "relais.test");
-    await userEvent.type(f.getByLabelText("Identifiant de l'hôtel"), "hk7qf29x");
-    await userEvent.type(f.getByLabelText("Clé secrète"), cle);
-    await userEvent.type(f.getByLabelText("Mot de passe"), mdp);
-    await userEvent.type(f.getByLabelText("Retapez le mot de passe"), confirmation);
-    await userEvent.click(f.getByRole("button", { name: "Consulter l'hôtel" }));
-  }
+beforeEach(() => definirModeDistant(false));
 
-  it("depuis le premier lancement, vérifie la clé puis ouvre la connexion par mot de passe seul", async () => {
-    let rattache = false;
+async function remplirIdentifiants(titre: string, bouton: string, identifiant = "hanta", mdp = "Madagascar2026") {
+  const f = within(await screen.findByRole("form", { name: titre }));
+  expect(f.getByText("Serveur : relais.monkadran.com (changer)")).toBeInTheDocument();
+  await userEvent.type(f.getByLabelText("Identifiant"), identifiant);
+  await userEvent.type(f.getByLabelText("Mot de passe"), mdp);
+  await userEvent.click(f.getByRole("button", { name: bouton }));
+}
+
+describe("Ordinateur de l'hôtel : retrouver mon hôtel", () => {
+  it("vérifie l'identifiant et le mot de passe, prévient, puis installe l'hôtel", async () => {
+    let installe = false;
     const appels = simulerRust({
-      etat_application: () =>
-        etatApp(rattache ? { initialise: true, consultation_distance: true, nom_hotel: "Hôtel du Lac" } : {}),
-      consulter_hotel_distant: () => {
-        rattache = true;
+      etat_application: () => etatApp(installe ? { initialise: true, nom_hotel: "Hôtel du Lac" } : {}),
+      retrouver_hotel: ({ mot_de_passe }) =>
+        mot_de_passe === "Madagascar2026"
+          ? { copie_du: "2026-11-20T09:30:00Z" }
+          : erreurRust({ code: "IDENTIFIANTS_INVALIDES" }),
+      confirmer_reprise: () => {
+        installe = true;
         return null;
       },
     });
     demarrer();
-    await remplir();
+    await userEvent.click(await screen.findByRole("button", { name: /Retrouver mon hôtel/ }));
+    await remplirIdentifiants("Retrouver mon hôtel", "Retrouver mon hôtel", "hanta", "mauvais");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Identifiant ou mot de passe incorrect");
 
-    expect(await screen.findByText("Cet ordinateur peut maintenant consulter l'hôtel.")).toBeInTheDocument();
-    expect(appelsDe(appels, "consulter_hotel_distant")[0]?.args).toEqual({
-      adresse: "https://relais.test",
-      hotel_id: "HK7Q-F29X",
-      cle_secrete: CLE,
-      mot_de_passe: "proprio2026",
+    await userEvent.clear(screen.getByLabelText("Mot de passe"));
+    await userEvent.type(screen.getByLabelText("Mot de passe"), "Madagascar2026");
+    await userEvent.click(screen.getByRole("button", { name: "Retrouver mon hôtel" }));
+    expect(await screen.findByText("Votre hôtel a été trouvé")).toBeInTheDocument();
+    expect(screen.getByText(/ouvrez-y Tanana une minute avec Internet/)).toBeInTheDocument();
+    expect(appelsDe(appels, "retrouver_hotel").at(-1)?.args).toEqual({
+      adresse: "https://relais.monkadran.com",
+      identifiant: "hanta",
+      mot_de_passe: "Madagascar2026",
     });
+    expect(appelsDe(appels, "confirmer_reprise")).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "Installer l'hôtel sur cet ordinateur" }));
+    expect(await screen.findByText("Votre hôtel est sur cet ordinateur")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Continuer" }));
-
-    expect(await screen.findByRole("heading", { name: "Hôtel du Lac" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Identifiant")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Mot de passe")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Se connecter" })).toBeInTheDocument();
   });
 
-  it("prévient si les données n'ont pas encore pu être téléchargées", async () => {
+  it("explique quand l'autre ordinateur n'a encore rien envoyé", async () => {
     simulerRust({
       etat_application: () => etatApp({}),
-      consulter_hotel_distant: () => "Impossible de joindre le serveur.",
+      retrouver_hotel: () => erreurRust({ code: "INSTANTANE_ABSENT" }),
     });
     demarrer();
-    await remplir();
-    expect(await screen.findByText("Les données n'ont pas encore pu être téléchargées")).toBeInTheDocument();
-    expect(screen.getByText(/Tanana réessaiera en arrière-plan/)).toBeInTheDocument();
-  });
-
-  it("compte les caractères de la clé avant d'appeler Rust", async () => {
-    const appels = simulerRust({ etat_application: () => etatApp({}) });
-    demarrer();
-    await remplir("K7QF-29XM-ABCD");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Vous en avez tapé 12");
-    expect(appelsDe(appels, "consulter_hotel_distant")).toHaveLength(0);
-  });
-
-  it("refuse deux mots de passe différents", async () => {
-    const appels = simulerRust({ etat_application: () => etatApp({}) });
-    demarrer();
-    await remplir(CLE, "proprio2026", "proprio2027");
-    expect(await screen.findByRole("alert")).toHaveTextContent("ne sont pas identiques");
-    expect(appelsDe(appels, "consulter_hotel_distant")).toHaveLength(0);
-  });
-
-  it("explique une clé qui ne correspond pas", async () => {
-    simulerRust({
-      etat_application: () => etatApp({}),
-      consulter_hotel_distant: () => erreurRust({ code: "CLE_DISTANCE_INCORRECTE" }),
-    });
-    demarrer();
-    await remplir();
-    expect(await screen.findByRole("alert")).toHaveTextContent("La clé secrète ne correspond pas à cet hôtel");
-  });
-
-  it("le bouton Retour revient à la création d'hôtel", async () => {
-    simulerRust({ etat_application: () => etatApp({}) });
-    demarrer();
-    await userEvent.click(await screen.findByRole("button", { name: "Consulter un hôtel à distance" }));
-    await userEvent.click(screen.getByRole("button", { name: "Retour" }));
-    expect(await screen.findByRole("button", { name: "Créer l'hôtel" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: /Retrouver mon hôtel/ }));
+    await remplirIdentifiants("Retrouver mon hôtel", "Retrouver mon hôtel");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Ouvrez Tanana quelques minutes avec Internet sur l'ordinateur où vous avez créé l'hôtel",
+    );
   });
 });
 
-describe("Poste du propriétaire : consulter", () => {
-  function simulerCopie(autres: Record<string, Gestionnaire> = {}) {
-    return simulerRust({
+describe("Poste à distance : relier cet ordinateur", () => {
+  it("identifiant et mot de passe suffisent, puis connexion par mot de passe", async () => {
+    let relie = false;
+    const appels = simulerRust({
+      etat_application: () =>
+        etatApp(relie ? { initialise: true, consultation_distance: true, nom_hotel: "Hôtel du Lac" } : {}),
+      travailler_a_distance: () => {
+        relie = true;
+        return "Impossible de joindre le serveur.";
+      },
+    });
+    demarrer();
+    await userEvent.click(await screen.findByRole("button", { name: /Travailler à distance/ }));
+    await remplirIdentifiants("Travailler à distance", "Relier cet ordinateur à l'hôtel");
+    expect(await screen.findByText("C'est prêt")).toBeInTheDocument();
+    expect(screen.getByText(/n'ont pas encore pu être téléchargées/)).toBeInTheDocument();
+    expect(appelsDe(appels, "travailler_a_distance")[0]?.args).toEqual({
+      adresse: "https://relais.monkadran.com",
+      identifiant: "hanta",
+      mot_de_passe: "Madagascar2026",
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Continuer" }));
+    expect(await screen.findByText("Travail à distance", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Mot de passe")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Identifiant")).not.toBeInTheDocument();
+  });
+
+  it("demande l'identifiant avant d'appeler Rust, et l'adresse peut être changée", async () => {
+    const appels = simulerRust({ etat_application: () => etatApp({}), travailler_a_distance: () => null });
+    demarrer();
+    await userEvent.click(await screen.findByRole("button", { name: /Travailler à distance/ }));
+    const f = within(await screen.findByRole("form", { name: "Travailler à distance" }));
+    await userEvent.click(f.getByRole("button", { name: "Relier cet ordinateur à l'hôtel" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Écrivez votre identifiant");
+    await userEvent.click(f.getByRole("button", { name: /\(changer\)/ }));
+    const adresse = f.getByLabelText("Adresse du serveur");
+    await userEvent.clear(adresse);
+    await userEvent.type(adresse, "relais.test/");
+    await userEvent.type(f.getByLabelText("Identifiant"), "hanta");
+    await userEvent.type(f.getByLabelText("Mot de passe"), "Madagascar2026");
+    await userEvent.click(f.getByRole("button", { name: "Relier cet ordinateur à l'hôtel" }));
+    await waitFor(() =>
+      expect(appelsDe(appels, "travailler_a_distance")[0]?.args).toMatchObject({ adresse: "https://relais.test" }),
+    );
+  });
+});
+
+describe("Poste à distance : travailler", () => {
+  function simulerPoste(modifications: boolean, autres: Record<string, Gestionnaire> = {}) {
+    const lien = { possible: modifications };
+    const appels = simulerRust({
       etat_application: () => etatApp({ initialise: true, consultation_distance: true, nom_hotel: "Hôtel du Lac" }),
-      connexion_copie: ({ mot_de_passe }) =>
-        mot_de_passe === "proprio2026" ? SESSION_DISTANTE : erreurRust({ code: "IDENTIFIANTS_INVALIDES" }),
+      connexion_distante: ({ mot_de_passe }) =>
+        mot_de_passe === "Madagascar2026"
+          ? {
+              session: modifications ? SESSION_HOTEL : SESSION_COPIE,
+              modifications_possibles: modifications,
+              raison: modifications ? null : "L'ordinateur de l'hôtel n'est pas joignable",
+            }
+          : erreurRust({ code: "IDENTIFIANTS_INVALIDES" }),
       parametres: () => ({ ...PARAMETRES, nom_hotel: "Hôtel du Lac" }),
-      ma_session: () => SESSION_DISTANTE,
+      ma_session: () => (lien.possible ? SESSION_HOTEL : SESSION_COPIE),
+      lien_hotel: () => ({ modifications_possibles: lien.possible, session_hotel: lien.possible ? SESSION_HOTEL : null }),
       etat_copie: () => COPIE(),
       mettre_a_jour_copie: () => 0,
       journal: () => [],
@@ -158,76 +193,91 @@ describe("Poste du propriétaire : consulter", () => {
       sessions_actives: () => [],
       planning: () => [],
       lister_chambres: () => [],
+      rechercher_clients: () => [],
       ...autres,
     });
+    return { appels, lien };
   }
 
-  async function seConnecter(mdp = "proprio2026") {
+  async function seConnecter(mdp = "Madagascar2026") {
     await userEvent.type(await screen.findByLabelText("Mot de passe"), mdp);
     await userEvent.click(screen.getByRole("button", { name: "Se connecter" }));
   }
 
   it("refuse un mauvais mot de passe", async () => {
-    simulerCopie();
+    simulerPoste(true);
     demarrer();
     await seConnecter("mauvais99");
     expect(await screen.findByRole("alert")).toHaveTextContent("Identifiant ou mot de passe incorrect");
   });
 
-  it("montre l'hôtel en lecture seule, avec la date des informations, et met à jour à l'ouverture", async () => {
-    const appels = simulerCopie();
-    demarrer();
-    await seConnecter();
-
-    const bandeau = await screen.findByRole("region", { name: "Consultation à distance" });
-    expect(bandeau).toHaveTextContent("rien ne peut être modifié d'ici");
-    await waitFor(() => expect(bandeau).toHaveTextContent(/Informations de l'hôtel du aujourd'hui à/));
-    expect(bandeau).toHaveTextContent("Dernier signe de l'hôtel il y a 1 minute.");
-    expect(appelsDe(appels, "mettre_a_jour_copie").length).toBeGreaterThanOrEqual(1);
-
-    // Accueil : pas de « Bonsoir Consultation à distance », pas de « 0 connecté » trompeur
-    expect(await screen.findByRole("heading", { level: 1, name: /^Bon(jour|soir)$/ })).toBeInTheDocument();
-    expect(await screen.findByText("Dernières actions")).toBeInTheDocument();
-    expect(screen.queryByText("Personnes connectées")).not.toBeInTheDocument();
-    expect(appelsDe(appels, "sessions_actives")).toHaveLength(0);
-
-    const menu = screen.getByRole("navigation", { name: "Menu principal" });
-    expect(within(menu).getByRole("button", { name: "Caisse" })).toBeInTheDocument();
-    expect(within(menu).queryByRole("button", { name: "Réglages" })).not.toBeInTheDocument();
-  });
-
-  it("les employés se consultent sans boutons de modification", async () => {
-    simulerCopie({
-      lister_utilisateurs: () => [
-        {
-          ...SESSION_DISTANTE.utilisateur,
-          id: "u-marie",
-          identifiant: "marie",
-          nom: "Marie",
-          role_id: "role-reception",
-          role_nom: "Réception",
-          cree_le: "2026-03-10T14:00:00.000Z",
-        },
-      ],
-      lister_roles: () => [{ id: "role-reception", nom: "Réception", permissions: [], systeme: true }],
-      permissions_perso: () => [],
-      permissions_utilisateur: () => ["reservation.voir"],
+  it("hôtel joignable : les modifications partent à l'hôtel, les lectures restent sur la copie", async () => {
+    const { appels } = simulerPoste(true, {
+      commande_distante: ({ commande, args }) =>
+        commande === "creer_client"
+          ? { id: "cl9", ...(args as { donnees: object }).donnees, cree_le: "2026-11-23T10:00:00Z" }
+          : erreurRust({ code: "BASE", details: "inattendu" }),
+      obtenir_client: () => ({ id: "cl9", nom: "Andry", prenom: null, telephone: null, email: null, piece_identite: null, notes: null, cree_le: "2026-11-23T10:00:00Z" }),
+      reservations_du_client: () => [],
     });
     demarrer();
     await seConnecter();
-    await userEvent.click(await screen.findByRole("button", { name: "Employés et accès" }));
-    await userEvent.click(await screen.findByRole("button", { name: /Marie/ }));
+    const bandeau = await screen.findByRole("region", { name: "Travail à distance" });
+    expect(bandeau).toHaveTextContent("vos changements partent directement à l'hôtel");
+    await waitFor(() => expect(bandeau).toHaveTextContent(/Informations de l'hôtel du aujourd'hui à/));
 
-    expect(await screen.findByText("Rôle : Réception.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Ajouter un employé" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Suspendre" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Réinitialiser le mot de passe" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Rôle")).not.toBeInTheDocument();
-    expect(screen.queryAllByRole("combobox")).toHaveLength(0);
+    // Les réglages et « Mon compte » sont là : ce sont ses vrais droits d'administratrice
+    const menu = screen.getByRole("navigation", { name: "Menu principal" });
+    expect(within(menu).getByRole("button", { name: "Réglages" })).toBeInTheDocument();
+
+    await userEvent.click(within(menu).getByRole("button", { name: "Clients" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Nouveau client" }));
+    await userEvent.type(screen.getByLabelText("Nom"), "Andry");
+    await userEvent.click(screen.getByRole("button", { name: "Enregistrer le client" }));
+    await waitFor(() => expect(appelsDe(appels, "commande_distante")).toHaveLength(1));
+    expect(appelsDe(appels, "commande_distante")[0]?.args).toMatchObject({
+      token: "jeton-test",
+      commande: "creer_client",
+      args: { donnees: expect.objectContaining({ nom: "Andry" }) },
+    });
+    expect(appelsDe(appels, "creer_client")).toHaveLength(0);
+    expect(appelsDe(appels, "rechercher_clients").length).toBeGreaterThan(0);
+  });
+
+  it("une modification refusée faute d'hôtel joignable s'explique simplement", async () => {
+    simulerPoste(true, {
+      commande_distante: () => erreurRust({ code: "HOTEL_INJOIGNABLE" }),
+    });
+    demarrer();
+    await seConnecter();
+    await userEvent.click(await screen.findByRole("button", { name: "Clients" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Nouveau client" }));
+    await userEvent.type(screen.getByLabelText("Nom"), "Andry");
+    await userEvent.click(screen.getByRole("button", { name: "Enregistrer le client" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("L'ordinateur de l'hôtel n'est pas joignable");
+    expect(screen.getByRole("alert")).toHaveTextContent("Rien n'a été modifié");
+  });
+
+  it("hôtel injoignable : consultation seulement, puis les modifications reviennent toutes seules", async () => {
+    const { lien } = simulerPoste(false);
+    demarrer();
+    await seConnecter();
+    const bandeau = await screen.findByRole("region", { name: "Travail à distance" });
+    expect(bandeau).toHaveTextContent("l'hôtel n'est pas joignable, consultation seulement");
+    const menu = screen.getByRole("navigation", { name: "Menu principal" });
+    expect(within(menu).queryByRole("button", { name: "Réglages" })).not.toBeInTheDocument();
+    await userEvent.click(within(menu).getByRole("button", { name: "Clients" }));
+    expect(screen.queryByRole("button", { name: "Nouveau client" })).not.toBeInTheDocument();
+
+    // L'hôtel revient en ligne
+    lien.possible = true;
+    await userEvent.click(screen.getByRole("button", { name: "Mettre à jour" }));
+    await waitFor(() => expect(bandeau).toHaveTextContent("vos changements partent directement à l'hôtel"));
+    expect(await screen.findByRole("button", { name: "Nouveau client" })).toBeInTheDocument();
   });
 
   it("prévient quand l'hôtel ne donne plus de nouvelles", async () => {
-    simulerCopie({ etat_copie: () => COPIE({ dernier_contact: new Date(Date.now() - 5 * 3600_000).toISOString() }) });
+    simulerPoste(false, { etat_copie: () => COPIE({ dernier_contact: new Date(Date.now() - 5 * 3600_000).toISOString() }) });
     demarrer();
     await seConnecter();
     expect(await screen.findByText(/L'hôtel n'a pas donné de nouvelles depuis/)).toBeInTheDocument();
@@ -236,48 +286,66 @@ describe("Poste du propriétaire : consulter", () => {
 
   it("« Mettre à jour » recharge la page ; une erreur réseau s'affiche sans bloquer", async () => {
     let reponse: () => number = () => 0;
-    const appels = simulerCopie({ mettre_a_jour_copie: () => reponse() });
+    const { appels } = simulerPoste(true, { mettre_a_jour_copie: () => reponse() });
     demarrer();
     await seConnecter();
-    await screen.findByRole("region", { name: "Consultation à distance" });
-    await waitFor(() => expect(appelsDe(appels, "mettre_a_jour_copie")).toHaveLength(1));
+    await screen.findByRole("region", { name: "Travail à distance" });
     const avant = appelsDe(appels, "journal").length + appelsDe(appels, "sessions_actives").length;
-
     reponse = () => 2;
     await userEvent.click(screen.getByRole("button", { name: "Mettre à jour" }));
     await waitFor(() =>
       expect(appelsDe(appels, "journal").length + appelsDe(appels, "sessions_actives").length).toBeGreaterThan(avant),
     );
-
     reponse = () => erreurRust({ code: "RELAIS_INJOIGNABLE", details: "délai dépassé" });
     await userEvent.click(screen.getByRole("button", { name: "Mettre à jour" }));
-    expect(await screen.findByText(/Impossible de joindre le serveur de consultation à distance/)).toBeInTheDocument();
+    expect(await screen.findByText(/Impossible de joindre le serveur de Tanana/)).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Menu principal" })).toBeInTheDocument();
   });
 
-  it("dit clairement que l'hôtel a arrêté la consultation à distance", async () => {
-    simulerCopie({ mettre_a_jour_copie: () => erreurRust({ code: "HOTEL_INCONNU_DU_RELAIS" }) });
-    demarrer();
-    await seConnecter();
-    expect(await screen.findByText(/L'hôtel a arrêté la consultation à distance/)).toBeInTheDocument();
-    expect(screen.getByText(/Celles affichées ici sont celles du dernier envoi/)).toBeInTheDocument();
-  });
-
   it("les nouveautés reçues automatiquement attendent que la personne les demande", async () => {
-    const appels = simulerCopie({ mettre_a_jour_copie: () => 3 });
-    demarrer();
-    await seConnecter();
-    const afficher = await screen.findByRole("button", { name: "Afficher les nouveautés" });
-    const avant = appelsDe(appels, "journal").length + appelsDe(appels, "sessions_actives").length;
-    await userEvent.click(afficher);
-    expect(screen.queryByRole("button", { name: "Afficher les nouveautés" })).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(appelsDe(appels, "journal").length + appelsDe(appels, "sessions_actives").length).toBeGreaterThan(avant),
-    );
+    let donnees = COPIE().donnees_du;
+    const { appels } = simulerPoste(true, { etat_copie: () => COPIE({ donnees_du: donnees }) });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      demarrer();
+      await seConnecter();
+      await screen.findByRole("region", { name: "Travail à distance" });
+      donnees = new Date().toISOString();
+      await vi.advanceTimersByTimeAsync(16_000);
+      const afficher = await screen.findByRole("button", { name: "Afficher les nouveautés" });
+      const avant = appelsDe(appels, "journal").length + appelsDe(appels, "sessions_actives").length;
+      await userEvent.click(afficher);
+      expect(screen.queryByRole("button", { name: "Afficher les nouveautés" })).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(appelsDe(appels, "journal").length + appelsDe(appels, "sessions_actives").length).toBeGreaterThan(avant),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
-describe("Poste du propriétaire : mot de passe oublié ou clé perdue", () => {
+describe("Ancien ordinateur principal", () => {
+  it("apprend qu'un autre ordinateur a repris l'hôtel et passe en travail à distance", async () => {
+    let remplace = true;
+    const appels = simulerRust({
+      etat_application: () =>
+        etatApp(remplace ? { initialise: true, poste_remplace: true, nom_hotel: "Hôtel du Lac" } : {}),
+      abandonner_poste: () => {
+        remplace = false;
+        return "/Users/hanta/Library/sauvegardes/tanana-ancien-ordinateur-principal.db";
+      },
+    });
+    demarrer();
+    expect(await screen.findByText("L'hôtel est maintenant sur un autre ordinateur")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Se connecter" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Passer en travail à distance" }));
+    expect(await screen.findByRole("button", { name: /Travailler à distance/ })).toBeInTheDocument();
+    expect(appelsDe(appels, "abandonner_poste")).toHaveLength(1);
+  });
+});
+
+describe("Poste à distance : mot de passe oublié ou clé perdue", () => {
   it("mot de passe oublié : l'hôtel est oublié, puis on revient au premier lancement", async () => {
     let copie = true;
     const appels = simulerRust({
@@ -291,18 +359,16 @@ describe("Poste du propriétaire : mot de passe oublié ou clé perdue", () => {
     demarrer();
     await userEvent.click(await screen.findByRole("button", { name: "Mot de passe oublié ?" }));
     expect(screen.getByText(/rien n'est perdu/i)).toBeInTheDocument();
-
-    // « Retour » ne touche à rien
     await userEvent.click(screen.getByRole("button", { name: "Retour" }));
     expect(appelsDe(appels, "oublier_hotel_distant")).toHaveLength(0);
 
     await userEvent.click(await screen.findByRole("button", { name: "Mot de passe oublié ?" }));
-    await userEvent.click(screen.getByRole("button", { name: "Rattacher l'hôtel à nouveau" }));
-    expect(await screen.findByRole("button", { name: "Consulter un hôtel à distance" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Relier à nouveau" }));
+    expect(await screen.findByRole("button", { name: /Travailler à distance/ })).toBeInTheDocument();
     expect(appelsDe(appels, "oublier_hotel_distant")).toHaveLength(1);
   });
 
-  it("clé de protection perdue : pas de clé de 64 caractères à chercher, on rattache à nouveau", async () => {
+  it("clé de protection perdue : pas de clé de 64 caractères à chercher, on relie à nouveau", async () => {
     let copie = true;
     simulerRust({
       etat_application: () =>
@@ -313,9 +379,9 @@ describe("Poste du propriétaire : mot de passe oublié ou clé perdue", () => {
       },
     });
     demarrer();
-    expect(await screen.findByText("Cet ordinateur doit être rattaché à nouveau")).toBeInTheDocument();
+    expect(await screen.findByText("Cet ordinateur doit être relié à nouveau")).toBeInTheDocument();
     expect(screen.queryByLabelText("Clé (64 caractères)")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Rattacher l'hôtel à nouveau" }));
-    expect(await screen.findByRole("button", { name: "Consulter un hôtel à distance" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Relier à nouveau" }));
+    expect(await screen.findByRole("button", { name: /Travailler à distance/ })).toBeInTheDocument();
   });
 });

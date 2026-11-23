@@ -201,7 +201,7 @@ export function ListeActions({ entrees, vide }: { entrees: EntreeJournal[]; vide
           <span className="flex items-center gap-2.5">
             {e.sensible && <span className="size-2.5 shrink-0 rounded-full bg-orange" aria-label="à vérifier" />}
             <span>
-              <span className="font-semibold">{libelleAction(e.action)}</span>
+              <span className="font-semibold">{libelleAction(e.action, e.apres)}</span>
               <span className="text-gris"> — {e.utilisateur_nom ?? "Tanana"}</span>
             </span>
           </span>

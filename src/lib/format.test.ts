@@ -1,4 +1,4 @@
-import { aujourdhui, decalageLocal, formatHeure, formatHorodatage, formatJour, formatMontant, lireMontant, resteDe, resteDesSejours, saisieMontant } from "./format";
+import { aujourdhui, decalageLocal, emailPlausible, formatHeure, formatHorodatage, formatJour, formatMontant, lireMontant, resteDe, resteDesSejours, saisieMontant } from "./format";
 
 /** Intl utilise des espaces insécables : on les normalise pour comparer. */
 const n = (s: string) => s.replace(/[  ]/g, " ");
@@ -101,4 +101,15 @@ describe("reste dû avec les groupes", () => {
     expect(resteDesSejours([duGroupe("g1", 0, 50_000), duGroupe("g2", 0, 30_000)])).toBe(80_000);
     expect(resteDesSejours([duGroupe("g1", 10_000, -5_000)])).toBe(0);
   });
+});
+
+describe("emailPlausible (même règle que Rust)", () => {
+  it.each([
+    ["nom@exemple.com", true],
+    ["a@b", true],
+    ["nom exemple.com", false],
+    ["@exemple.com", false],
+    ["nom@", false],
+    ["nom @exemple.com", false],
+  ])("%s → %s", (e, attendu) => expect(emailPlausible(e)).toBe(attendu));
 });

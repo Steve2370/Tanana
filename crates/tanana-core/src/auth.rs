@@ -210,9 +210,12 @@ pub(crate) fn verifier_session(tx: &Transaction, token: &str, maintenant: DateTi
 /// id, hash mot de passe, hash PIN, statut, échecs, bloqué jusqu'à
 type LigneConnexion = (String, String, Option<String>, StatutUtilisateur, i64, Option<String>);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Methode {
     MotDePasse,
     Pin,
+    /// Mot de passe, depuis un autre ordinateur, par le relais (inscrit « à distance » au journal)
+    Distance,
 }
 
 impl Tanana {
@@ -251,6 +254,7 @@ impl Tanana {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![admin_id, identifiant, nom, hacher(&cfg.admin_mot_de_passe)?, ROLE_ADMIN, maintenant],
         )?;
+        crate::distance::acces::noter_acces(&tx, &admin_id, &cfg.admin_mot_de_passe)?;
         definir_parametre(&tx, "nom_hotel", &nom_hotel)?;
         definir_parametre(&tx, "devise", &devise)?;
         definir_parametre(&tx, "decimales_devise", &cfg.decimales_devise.to_string())?;
@@ -304,6 +308,7 @@ impl Tanana {
             params![id, hacher(nouveau_mdp)?],
         )?;
         fermer_sessions(&tx, &id, &maintenant)?;
+        crate::distance::acces::noter_acces(&tx, &id, nouveau_mdp)?;
         let nouveau_code = generer_code_recuperation()?;
         definir_parametre(&tx, "code_recuperation_hash", &hacher(&normaliser_code(&nouveau_code))?)?;
         audit::ecrire(&tx, &maintenant, Some(&id), "auth.recuperation", Some("utilisateur"), Some(&id), None, None)?;
@@ -320,6 +325,12 @@ impl Tanana {
     /// Changement rapide d'utilisateur au comptoir.
     pub fn connexion_pin(&mut self, identifiant: &str, pin: &str) -> Resultat<SessionOuverte> {
         self.tenter_connexion(identifiant, pin, Methode::Pin)
+    }
+
+    /// Connexion demandée depuis un autre ordinateur, par le relais : mêmes
+    /// règles (blocage après plusieurs échecs), inscrite « à distance ».
+    pub(crate) fn connexion_distante(&mut self, identifiant: &str, mot_de_passe: &str) -> Resultat<SessionOuverte> {
+        self.tenter_connexion(identifiant, mot_de_passe, Methode::Distance)
     }
 
     fn tenter_connexion(&mut self, identifiant: &str, secret: &str, methode: Methode) -> Resultat<SessionOuverte> {
@@ -343,6 +354,7 @@ impl Tanana {
         let nom_methode = match methode {
             Methode::MotDePasse => "mot_de_passe",
             Methode::Pin => "pin",
+            Methode::Distance => "distance",
         };
         let ligne: Option<LigneConnexion> = tx
             .query_row(
@@ -386,7 +398,7 @@ impl Tanana {
         }
 
         let hash = match methode {
-            Methode::MotDePasse => Some(mdp_hash),
+            Methode::MotDePasse | Methode::Distance => Some(mdp_hash),
             Methode::Pin => pin_hash,
         };
         let valide = match &hash {
@@ -471,6 +483,9 @@ impl Tanana {
             Some(&json!({ "methode": nom_methode })),
         )?;
 
+        if methode != Methode::Pin {
+            crate::distance::acces::noter_acces(tx, &uid, secret)?;
+        }
         let perms = permissions_effectives(tx, &uid)?;
         Ok(SessionOuverte { token, utilisateur: utilisateur(tx, &uid)?, permissions: liste_triee(&perms) })
     }
@@ -517,6 +532,7 @@ impl Tanana {
                 "UPDATE utilisateurs SET mot_de_passe_hash = ?2, doit_changer_mdp = 0 WHERE id = ?1",
                 params![a.utilisateur_id, hacher(nouveau)?],
             )?;
+            crate::distance::acces::noter_acces(tx, &a.utilisateur_id, nouveau)?;
             audit::ecrire(
                 tx,
                 &a.horodatage(),

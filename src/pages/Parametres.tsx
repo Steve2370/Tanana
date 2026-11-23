@@ -136,7 +136,7 @@ function ParametresHotel() {
               onChange={(e) => modifie(setTelephone)(e.target.value)}
             />
             <Champ
-              libelle="Courriel (facultatif)"
+              libelle="Email (facultatif)"
               type="email"
               autoCapitalize="off"
               spellCheck={false}

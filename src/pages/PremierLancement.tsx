@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { CircleCheck, Globe, History, Printer } from "lucide-react";
+import { CircleCheck, History, Hotel, MonitorSmartphone, Printer, Sparkles, type LucideIcon } from "lucide-react";
 
 import { EcranCentre } from "../App";
 import {
@@ -16,7 +16,11 @@ import {
 import { api } from "../lib/api";
 import { DEVISES } from "../lib/format";
 import { RemettreCopie } from "../components/restauration";
-import { RattacherHotel } from "./distance/ConsultationDistante";
+import { ADRESSE_RELAIS_DEFAUT, CODE_INVITATION_DEFAUT } from "../lib/distance";
+import { RetrouverHotel, TravaillerADistance } from "./distance/ConsultationDistante";
+
+/** Le mot de passe de l'administrateur protège aussi l'accès à distance : un peu plus long. */
+export const LONGUEUR_MDP_ADMIN = 10;
 
 export function PremierLancement({ onTermine }: { onTermine: () => void }) {
   const [nomHotel, setNomHotel] = useState("");
@@ -27,27 +31,34 @@ export function PremierLancement({ onTermine }: { onTermine: () => void }) {
   const [confirmation, setConfirmation] = useState("");
   const [code, setCode] = useState<string | null>(null);
   const [codeNote, setCodeNote] = useState(false);
-  const [distance, setDistance] = useState(false);
+  const [choix, setChoix] = useState<"creer" | "retrouver" | "distance" | null>(null);
   const [restauration, setRestauration] = useState<"choix" | "faite" | null>(null);
   const { lancer, enCours, erreur, setErreur } = useAction(api.initialiser);
 
   const soumettre = async (e: FormEvent) => {
     e.preventDefault();
-    if (!motDePasseValide(mdp)) return setErreur("Le mot de passe ne respecte pas encore toutes les règles (voir la liste).");
+    if (!motDePasseValide(mdp) || mdp.length < LONGUEUR_MDP_ADMIN)
+      return setErreur("Le mot de passe ne respecte pas encore toutes les règles (voir la liste).");
     if (mdp !== confirmation) return setErreur("Les deux mots de passe ne sont pas identiques. Retapez-les.");
     const decimales = DEVISES.find((d) => d.code === devise)?.decimales ?? 0;
-    const c = await lancer({
-      nom_hotel: nomHotel,
-      devise,
-      decimales_devise: decimales,
-      admin_identifiant: identifiant,
-      admin_nom: nom,
-      admin_mot_de_passe: mdp,
-    });
+    // L'hôtel se relie tout seul au serveur dès qu'Internet est là : rien à régler.
+    const c = await lancer(
+      {
+        nom_hotel: nomHotel,
+        devise,
+        decimales_devise: decimales,
+        admin_identifiant: identifiant,
+        admin_nom: nom,
+        admin_mot_de_passe: mdp,
+      },
+      ADRESSE_RELAIS_DEFAUT,
+      CODE_INVITATION_DEFAUT,
+    );
     if (c) setCode(c);
   };
 
-  if (distance) return <RattacherHotel onTermine={onTermine} onRetour={() => setDistance(false)} />;
+  if (choix === "retrouver") return <RetrouverHotel onTermine={onTermine} onRetour={() => setChoix(null)} />;
+  if (choix === "distance") return <TravaillerADistance onTermine={onTermine} onRetour={() => setChoix(null)} />;
 
   if (restauration === "faite") {
     return (
@@ -112,27 +123,51 @@ export function PremierLancement({ onTermine }: { onTermine: () => void }) {
     );
   }
 
+  if (choix === null) {
+    return (
+      <EcranCentre large>
+        <h1 className="mb-2 text-3xl font-bold text-marque-fonce">Bienvenue dans Tanana</h1>
+        <p className="mb-6 text-lg">Que voulez-vous faire sur cet ordinateur ?</p>
+        <div className="grid gap-4">
+          <Choix
+            icone={Sparkles}
+            titre="Créer mon hôtel"
+            texte="Première fois : vous configurez votre hôtel, ses chambres et vos premières réservations."
+            onClick={() => setChoix("creer")}
+          />
+          <Choix
+            icone={Hotel}
+            titre="Retrouver mon hôtel"
+            texte="Sur l'ordinateur de l'hôtel : tout ce que vous avez déjà préparé sur un autre ordinateur arrive ici."
+            onClick={() => setChoix("retrouver")}
+          />
+          <Choix
+            icone={MonitorSmartphone}
+            titre="Travailler à distance"
+            texte="Sur votre ordinateur personnel : suivre et modifier l'hôtel depuis chez vous ou depuis l'étranger."
+            onClick={() => setChoix("distance")}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setRestauration("choix")}
+          className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-lg px-1 text-base text-gris underline-offset-4 hover:underline"
+        >
+          <History className="size-5" aria-hidden />
+          Cet ordinateur remplace celui de l'hôtel et vous avez une copie de sécurité sur clé USB ?
+        </button>
+      </EcranCentre>
+    );
+  }
+
   const identiques = confirmation.length > 0 && mdp === confirmation;
 
   return (
     <EcranCentre large>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-marque/25 bg-marque-clair/60 px-5 py-3">
-        <p className="min-w-0 flex-1 basis-64 text-base">
-          Votre hôtel utilise déjà Tanana et vous voulez le suivre d'ici, même depuis l'étranger ?
-        </p>
-        <Bouton variante="secondaire" icone={Globe} onClick={() => setDistance(true)}>
-          Consulter un hôtel à distance
-        </Bouton>
-      </div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-trait bg-white px-5 py-3">
-        <p className="min-w-0 flex-1 basis-64 text-base">
-          Cet ordinateur remplace celui de l'hôtel (panne, vol) et vous avez une copie de sécurité ?
-        </p>
-        <Bouton variante="secondaire" icone={History} onClick={() => setRestauration("choix")}>
-          Remettre une copie de sécurité
-        </Bouton>
-      </div>
-      <Carte titre="Bienvenue ! Configurons votre hôtel">
+      <Bouton variante="secondaire" onClick={() => setChoix(null)} className="mb-5">
+        Retour
+      </Bouton>
+      <Carte titre="Configurons votre hôtel">
         <form onSubmit={soumettre} className="grid gap-5" noValidate>
           <Champ libelle="Nom de l'hôtel" value={nomHotel} onChange={(e) => setNomHotel(e.target.value)} required />
           <Selection
@@ -163,7 +198,19 @@ export function PremierLancement({ onTermine }: { onTermine: () => void }) {
             value={mdp}
             onChange={(e) => setMdp(e.target.value)}
             autoComplete="new-password"
-            aide={<ReglesMotDePasse motDePasse={mdp} />}
+            aide={
+              <>
+                <ReglesMotDePasse motDePasse={mdp} />
+                <span className={`flex items-center gap-2 ${mdp.length >= LONGUEUR_MDP_ADMIN ? "text-succes" : "text-gris"}`}>
+                  {mdp.length >= LONGUEUR_MDP_ADMIN ? (
+                    <CircleCheck className="size-5" aria-hidden />
+                  ) : (
+                    <span className="mx-[3px] size-3.5 rounded-full border-2 border-current" aria-hidden />
+                  )}
+                  Au moins {LONGUEUR_MDP_ADMIN} caractères : il sert aussi à travailler à distance
+                </span>
+              </>
+            }
           />
           <ChampMotDePasse
             libelle="Retapez le mot de passe"
@@ -186,5 +233,22 @@ export function PremierLancement({ onTermine }: { onTermine: () => void }) {
       </Carte>
 
     </EcranCentre>
+  );
+}
+
+/** Une grande carte de choix, facile à viser. */
+function Choix({ icone: Icone, titre, texte, onClick }: { icone: LucideIcon; titre: string; texte: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-5 rounded-2xl border-2 border-trait bg-white px-6 py-5 text-left shadow-sm transition hover:border-marque hover:bg-marque-clair/40 focus-visible:border-marque"
+    >
+      <Icone className="size-10 shrink-0 text-marque" aria-hidden />
+      <span>
+        <span className="block text-xl font-bold text-encre">{titre}</span>
+        <span className="block text-lg text-gris">{texte}</span>
+      </span>
+    </button>
   );
 }

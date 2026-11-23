@@ -4,8 +4,8 @@
 # En créer un : openssl rand -hex 6
 TANANA_RELAIS_CODES=
 
-# Nombre maximal d'hôtels inscrits
-TANANA_RELAIS_HOTELS_MAX=500
+# Nombre maximal d'hôtels inscrits (un seul hôtel utilise Tanana : 1)
+TANANA_RELAIS_HOTELS_MAX=1
 
 # Réseau Docker du Caddy qui tient les ports 80/443
 RESEAU_PROXY=kadran_internal

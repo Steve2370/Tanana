@@ -13,10 +13,20 @@ function demarrer() {
   );
 }
 
-const etat = (e: object) => ({ statut: "prete", initialise: false, nom_hotel: null, message: null, version: "0.1.0", ...e });
+const etat = (e: object) => ({
+  statut: "prete",
+  initialise: false,
+  consultation_distance: false,
+  poste_remplace: false,
+  nom_hotel: null,
+  message: null,
+  version: "0.1.0",
+  ...e,
+});
 
 describe("Premier lancement", () => {
   async function remplir(mdp: string, confirmation: string) {
+    await userEvent.click(await screen.findByRole("button", { name: /Créer mon hôtel/ }));
     await userEvent.type(await screen.findByLabelText("Nom de l'hôtel"), "Hôtel Tanana");
     await userEvent.selectOptions(screen.getByLabelText("Monnaie utilisée"), "CAD");
     await userEvent.type(screen.getByLabelText("Votre nom"), "Beltran");
@@ -35,9 +45,10 @@ describe("Premier lancement", () => {
       },
     });
     demarrer();
-    await remplir("admin2026", "admin2026");
+    await remplir("Ambositra26", "Ambositra26");
 
     expect(await screen.findByTestId("code-recuperation")).toHaveTextContent("ABCDE-FGHJK-MNPQR-STUVW");
+    // Le serveur est déjà rempli : l'hôtel s'y reliera tout seul
     expect(appels.find((a) => a.commande === "initialiser")?.args).toEqual({
       configuration: {
         nom_hotel: "Hôtel Tanana",
@@ -45,8 +56,10 @@ describe("Premier lancement", () => {
         decimales_devise: 2,
         admin_identifiant: "admin",
         admin_nom: "Beltran",
-        admin_mot_de_passe: "admin2026",
+        admin_mot_de_passe: "Ambositra26",
       },
+      relais: "https://relais.monkadran.com",
+      code_invitation: null,
     });
 
     const continuer = screen.getByRole("button", { name: "Continuer" });
@@ -59,7 +72,7 @@ describe("Premier lancement", () => {
   it("refuse des mots de passe différents sans appeler Rust", async () => {
     const appels = simulerRust({ etat_application: () => etat({}) });
     demarrer();
-    await remplir("admin2026", "admin2027");
+    await remplir("Ambositra26", "Ambositra27");
     expect(await screen.findByRole("alert")).toHaveTextContent("ne sont pas identiques");
     expect(appels.some((a) => a.commande === "initialiser")).toBe(false);
   });
@@ -76,13 +89,34 @@ describe("Premier lancement", () => {
     expect(appels.some((a) => a.commande === "initialiser")).toBe(false);
   });
 
+  it("le mot de passe de l'administrateur compte au moins 10 caractères (il sert aussi à distance)", async () => {
+    const appels = simulerRust({ etat_application: () => etat({}) });
+    demarrer();
+    await remplir("admin2026", "admin2026");
+    expect(screen.getByText(/Au moins 10 caractères/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("ne respecte pas encore toutes les règles");
+    expect(appels.some((a) => a.commande === "initialiser")).toBe(false);
+  });
+
+  it("propose trois chemins : créer, retrouver l'hôtel, travailler à distance", async () => {
+    simulerRust({ etat_application: () => etat({}) });
+    demarrer();
+    expect(await screen.findByRole("button", { name: /Créer mon hôtel/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Retrouver mon hôtel/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Travailler à distance/ })).toBeInTheDocument();
+    // Retour depuis la création
+    await userEvent.click(screen.getByRole("button", { name: /Créer mon hôtel/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Retour" }));
+    expect(await screen.findByRole("button", { name: /Retrouver mon hôtel/ })).toBeInTheDocument();
+  });
+
   it("affiche le message de Rust s'il refuse quand même", async () => {
     simulerRust({
       etat_application: () => etat({}),
       initialiser: () => erreurRust({ code: "VALIDATION", details: "la devise : code ISO à 3 lettres" }),
     });
     demarrer();
-    await remplir("admin2026", "admin2026");
+    await remplir("Ambositra26", "Ambositra26");
     expect(await screen.findByRole("alert")).toHaveTextContent("La devise : code ISO à 3 lettres.");
   });
 });

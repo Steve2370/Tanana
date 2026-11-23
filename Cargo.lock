@@ -4505,10 +4505,11 @@ dependencies = [
 
 [[package]]
 name = "tanana"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",
+ "data-encoding",
  "keyring",
  "log",
  "serde",
@@ -4529,7 +4530,7 @@ dependencies = [
 
 [[package]]
 name = "tanana-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -4556,14 +4557,14 @@ dependencies = [
 
 [[package]]
 name = "tanana-protocole"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "tanana-relais"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",

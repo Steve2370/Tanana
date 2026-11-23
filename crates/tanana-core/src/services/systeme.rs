@@ -66,7 +66,7 @@ impl Tanana {
             if let Some(e) = &email
                 && !courriel_plausible(e)
             {
-                return Err(Erreur::Validation("courriel de l'hôtel invalide".into()));
+                return Err(Erreur::Validation("email de l'hôtel invalide".into()));
             }
             for (cle, valeur, max) in [
                 ("adresse_hotel", texte_facultatif(p.adresse_hotel), 200),

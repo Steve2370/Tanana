@@ -3,6 +3,10 @@ import type { StatutDemarrage } from "./StatutDemarrage";
 
 export type EtatApplication = { statut: StatutDemarrage, initialise: boolean, 
 /**
- * Cet ordinateur consulte un hôtel à distance (copie en lecture seule).
+ * Cet ordinateur travaille à distance (copie de l'hôtel ; les modifications partent vers l'hôtel).
  */
-consultation_distance: boolean, nom_hotel: string | null, message: string | null, version: string, };
+consultation_distance: boolean, 
+/**
+ * Un autre ordinateur est devenu l'ordinateur principal de l'hôtel.
+ */
+poste_remplace: boolean, nom_hotel: string | null, message: string | null, version: string, };

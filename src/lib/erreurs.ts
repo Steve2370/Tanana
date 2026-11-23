@@ -76,7 +76,7 @@ export function messageErreur(e: Erreur): string {
     case "MONTANT_INVALIDE":
       return `Montant incorrect : ${e.details}.`;
     case "RELAIS_INJOIGNABLE":
-      return "Impossible de joindre le serveur de consultation à distance. Vérifiez la connexion Internet et l'adresse du serveur, puis réessayez.";
+      return "Impossible de joindre le serveur de Tanana. Vérifiez la connexion Internet de cet ordinateur, puis réessayez.";
     case "RELAIS_REFUSE":
       // À l'activation, l'hôtel n'a pas encore d'identifiant : seul le code d'invitation peut être en cause.
       if (e.details.includes("invitation")) {
@@ -88,7 +88,17 @@ export function messageErreur(e: Erreur): string {
     case "CLE_DISTANCE_INCORRECTE":
       return "La clé secrète ne correspond pas à cet hôtel. Vérifiez chaque groupe de 4 caractères sur le papier où elle a été notée.";
     case "LECTURE_SEULE":
-      return "Vous consultez cet hôtel à distance : rien ne peut être modifié d'ici.";
+      return "L'hôtel n'est pas joignable pour l'instant : vous pouvez consulter, mais pas modifier. Réessayez plus tard.";
+    case "POSTE_REMPLACE":
+      return "Cet ordinateur n'est plus celui de l'hôtel : l'hôtel a été installé sur un autre ordinateur.";
+    case "HOTEL_INJOIGNABLE":
+      return "L'ordinateur de l'hôtel n'est pas joignable (éteint, ou Internet coupé là-bas). Rien n'a été modifié. Réessayez plus tard.";
+    case "PAS_DE_REPONSE_HOTEL":
+      return "L'ordinateur de l'hôtel n'a pas répondu à temps. Le changement a peut-être été fait : attendez une minute, regardez s'il apparaît, puis réessayez si besoin.";
+    case "TROP_D_ESSAIS":
+      return "Trop de mots de passe incorrects. Par sécurité, attendez 15 minutes avant de réessayer.";
+    case "INSTANTANE_ABSENT":
+      return "Le serveur n'a pas encore reçu de copie complète de votre hôtel. Ouvrez Tanana quelques minutes avec Internet sur l'ordinateur où vous avez créé l'hôtel, puis réessayez.";
     case "ENREGISTREMENT_IMPOSSIBLE":
       return `Le fichier n'a pas pu être enregistré sur cet ordinateur. Vérifiez qu'il reste de la place, puis réessayez. Détail pour le support : ${e.details}`;
     case "BASE":

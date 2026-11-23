@@ -10,12 +10,14 @@ name: Publication
 # dans Settings › Secrets and variables › Actions (détails dans le README) :
 #
 #   Variables : TAURI_UPDATER_PUBKEY (clé publique de mise à jour)
-#               TANANA_RELAIS (adresse du serveur de consultation à distance)
+#               TANANA_RELAIS (adresse du serveur ; sans elle : https://relais.monkadran.com)
 #               DEPOT_VERSIONS (nom du dépôt PUBLIC qui reçoit les installeurs,
 #               ex. tanana-versions : les hôtels y téléchargent les mises à jour ;
 #               sans lui, tout reste dans ce dépôt et les mises à jour ne
 #               marchent que s'il est public)
-#   Secrets   : PUBLICATION_TOKEN (jeton GitHub avec accès en écriture au
+#   Secrets   : TANANA_CODE_INVITATION (code d'invitation du serveur, déjà rempli
+#               dans l'application : l'hôtel s'y relie tout seul à sa création)
+#               PUBLICATION_TOKEN (jeton GitHub avec accès en écriture au
 #               dépôt public, requis avec DEPOT_VERSIONS)
 #               TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 #               APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
@@ -43,6 +45,7 @@ jobs:
       DEPOT: ${{ github.repository_owner }}/${{ vars.DEPOT_VERSIONS || github.event.repository.name }}
       # Adresse du serveur proposée par défaut dans l'application
       VITE_TANANA_RELAIS: ${{ vars.TANANA_RELAIS }}
+      VITE_TANANA_CODE_INVITATION: ${{ secrets.TANANA_CODE_INVITATION }}
       # Mise à jour automatique
       TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

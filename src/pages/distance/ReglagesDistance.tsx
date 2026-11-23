@@ -7,14 +7,14 @@ import { CodesANoter } from "../../components/distance";
 import { Alerte, Bouton, Carte, Champ, ChampMotDePasse, useAction, useConfirmation } from "../../components/ui";
 import { api } from "../../lib/api";
 import { pluriel } from "../../lib/dates";
-import { ADRESSE_RELAIS_DEFAUT, nettoyerAdresse } from "../../lib/distance";
+import { ADRESSE_RELAIS_DEFAUT, CODE_INVITATION_DEFAUT, adresseCourte, nettoyerAdresse } from "../../lib/distance";
 import { versErreur } from "../../lib/erreurs";
 import { formatHorodatage } from "../../lib/format";
 
 /** L'état se rafraîchit tout seul pendant que la carte est affichée. */
 const RAFRAICHISSEMENT_MS = 30_000;
 
-/** Réglages › Consultation à distance (côté hôtel). */
+/** Réglages › Travail à distance (ordinateur de l'hôtel). */
 export function ReglagesDistance() {
   const [etat, setEtat] = useState<EtatDistance | null>(null);
   const [erreurChargement, setErreurChargement] = useState<string | null>(null);
@@ -38,15 +38,15 @@ export function ReglagesDistance() {
   }, [charger]);
 
   return (
-    <Carte titre="Consultation à distance">
+    <Carte titre="Travail à distance">
       <div className="grid gap-4">
         <p className="text-base text-gris">
-          Le propriétaire peut suivre l'hôtel depuis un autre pays (réservations, caisse, historique), sans rien pouvoir
-          modifier. Tanana continue de fonctionner sans Internet : les informations partent dès que la connexion
-          revient. Elles sont chiffrées sur cet ordinateur ; même le serveur ne peut pas les lire.
+          Un administrateur peut suivre et modifier l'hôtel depuis un autre ordinateur, même à l'étranger, avec son
+          identifiant et son mot de passe. Tanana continue de fonctionner sans Internet : les changements partent dès
+          que la connexion revient. Tout est chiffré sur cet ordinateur ; même le serveur ne peut rien lire.
         </p>
         {erreurChargement && <Alerte type="erreur">{erreurChargement}</Alerte>}
-        {arret && !etat?.active && <Alerte type={arret.type}>{arret.texte}</Alerte>}
+        {arret && <Alerte type={arret.type}>{arret.texte}</Alerte>}
         {codes ? (
           <CodesANoter codes={codes} onMasquer={() => setCodes(null)} />
         ) : (
@@ -63,9 +63,12 @@ export function ReglagesDistance() {
             />
           ) : (
             <Activation
-              onActivee={(c) => {
-                setArret(null);
-                setCodes(c);
+              onActivee={() => {
+                setArret({
+                  type: "succes",
+                  texte:
+                    "L'hôtel est relié au serveur. Vous pouvez maintenant travailler à distance avec votre identifiant et votre mot de passe.",
+                });
                 void charger();
               }}
             />
@@ -78,7 +81,7 @@ export function ReglagesDistance() {
 
 function Activation({ onActivee }: { onActivee: (c: CodesDistance) => void }) {
   const [adresse, setAdresse] = useState(ADRESSE_RELAIS_DEFAUT);
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(CODE_INVITATION_DEFAUT ?? "");
   const [avance, setAvance] = useState(!ADRESSE_RELAIS_DEFAUT);
   const { lancer, enCours, erreur, setErreur } = useAction(api.activerDistance);
 
@@ -87,14 +90,18 @@ function Activation({ onActivee }: { onActivee: (c: CodesDistance) => void }) {
     const a = nettoyerAdresse(adresse);
     if (!a) {
       setAvance(true);
-      return setErreur("Écrivez l'adresse du serveur de consultation à distance.");
+      return setErreur("Écrivez l'adresse du serveur.");
     }
     const c = await lancer(a, code.trim() || null);
     if (c) onActivee(c);
   };
 
   return (
-    <form onSubmit={soumettre} noValidate aria-label="Activer la consultation à distance" className="grid gap-4">
+    <form onSubmit={soumettre} noValidate aria-label="Relier l'hôtel au serveur" className="grid gap-4">
+      <p className="text-base">
+        Cet hôtel n'est pas encore relié au serveur (pas d'Internet à sa création ?). Tanana réessaie toute seule ; vous
+        pouvez aussi le faire maintenant.
+      </p>
       <Champ
         libelle="Code d'invitation (facultatif)"
         aide="Donné avec Tanana, s'il vous en faut un."
@@ -125,13 +132,13 @@ function Activation({ onActivee }: { onActivee: (c: CodesDistance) => void }) {
           onClick={() => setAvance(true)}
           className="justify-self-start rounded-lg px-1 text-base text-marque underline-offset-4 hover:underline"
         >
-          Serveur utilisé : {ADRESSE_RELAIS_DEFAUT} (changer)
+          Serveur : {adresseCourte(ADRESSE_RELAIS_DEFAUT)} (changer)
         </button>
       )}
       {erreur && <Alerte type="erreur">{erreur}</Alerte>}
       <div className="flex justify-end">
         <Bouton type="submit" icone={Globe} enCours={enCours} grand>
-          Activer la consultation à distance
+          Relier l'hôtel au serveur
         </Bouton>
       </div>
     </form>
@@ -175,7 +182,7 @@ function Active({
     const ok = await confirmer({
       titre: "Tout renvoyer ?",
       message:
-        "À utiliser seulement si le propriétaire ne voit pas certaines informations. Tout l'hôtel sera renvoyé ; cela peut prendre du temps avec une connexion lente.",
+        "À utiliser seulement si l'administrateur à distance ne voit pas certaines informations. Tout l'hôtel sera renvoyé ; cela peut prendre du temps avec une connexion lente.",
       libelleConfirmer: "Oui, tout renvoyer",
     });
     if (ok)
@@ -187,9 +194,9 @@ function Active({
 
   const arreter = async () => {
     const ok = await confirmer({
-      titre: "Arrêter la consultation à distance ?",
+      titre: "Arrêter le travail à distance ?",
       message:
-        "Le propriétaire ne pourra plus voir l'hôtel à distance et les données seront effacées du serveur. Pour reprendre, il faudra tout réactiver et noter une nouvelle clé.",
+        "Plus personne ne pourra voir ni modifier l'hôtel à distance, et les données seront effacées du serveur. Il faudra tout relier à nouveau pour reprendre.",
       libelleConfirmer: "Oui, arrêter",
       danger: true,
     });
@@ -199,11 +206,11 @@ function Active({
     if (efface === undefined) return;
     onArrete(
       efface
-        ? { type: "succes", texte: "La consultation à distance est arrêtée. Les données ont été effacées du serveur." }
+        ? { type: "succes", texte: "Le travail à distance est arrêté. Les données ont été effacées du serveur." }
         : {
             type: "attention",
             texte:
-              "La consultation à distance est arrêtée ici. Le serveur n'a pas pu être joint pour effacer les données ; elles ne sont plus mises à jour et restent illisibles sans la clé.",
+              "Le travail à distance est arrêté ici. Le serveur n'a pas pu être joint pour effacer les données ; elles ne sont plus mises à jour et restent illisibles sans la clé.",
           },
     );
   };
@@ -234,12 +241,12 @@ function Active({
         <Alerte type="attention" titre="Le dernier envoi n'a pas pu se faire">
           <p>{etat.derniere_erreur}</p>
           <p className="mt-1">
-            Ce n'est pas grave : rien n'est perdu, et Tanana réessaie toute seule chaque minute. L'hôtel continue de
-            fonctionner normalement.
+            Ce n'est pas grave : rien n'est perdu, et Tanana réessaie toute seule. L'hôtel continue de fonctionner
+            normalement.
           </p>
         </Alerte>
       ) : (
-        etat.dernier_envoi_le && <Alerte type="succes">La consultation à distance fonctionne.</Alerte>
+        etat.dernier_envoi_le && <Alerte type="succes">Le travail à distance fonctionne.</Alerte>
       )}
       {message && <Alerte type={message.type}>{message.texte}</Alerte>}
       {(action.erreur ?? arret.erreur) && <Alerte type="erreur">{action.erreur ?? arret.erreur}</Alerte>}
@@ -271,7 +278,7 @@ function Active({
             Envoyer maintenant
           </Bouton>
           <Bouton variante="secondaire" icone={KeyRound} onClick={() => setDemandeCle(true)}>
-            Afficher la clé
+            Clé de la page web
           </Bouton>
           <Bouton variante="secondaire" icone={RefreshCcw} onClick={() => void toutRenvoyer()}>
             Tout renvoyer

@@ -86,7 +86,7 @@ export function FormulaireClient({
         <Champ libelle="Nom" autoFocus {...champ("nom")} />
         <Champ libelle="Prénom (facultatif)" {...champ("prenom")} />
         <Champ libelle="Téléphone (facultatif)" inputMode="tel" aide="Utile pour retrouver le client." {...champ("telephone")} />
-        <Champ libelle="Courriel (facultatif)" type="email" autoCapitalize="off" spellCheck={false} {...champ("email")} />
+        <Champ libelle="Email (facultatif)" type="email" autoCapitalize="off" spellCheck={false} {...champ("email")} />
         <Champ libelle="Pièce d'identité (facultatif)" aide="Type et numéro, par exemple : CNI 123456789." {...champ("piece_identite")} />
       </div>
       <div>

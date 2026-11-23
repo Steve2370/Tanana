@@ -150,7 +150,7 @@ function ListeClients({
             libelle="Chercher un client"
             value={recherche}
             onChange={(e) => onRecherche(e.target.value)}
-            placeholder="Nom, prénom, téléphone ou courriel"
+            placeholder="Nom, prénom, téléphone ou email"
             spellCheck={false}
             autoFocus
           />
@@ -412,7 +412,7 @@ function FicheClient({
           >
             <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-lg">
               <Info libelle="Téléphone">{client.telephone}</Info>
-              <Info libelle="Courriel">{client.email}</Info>
+              <Info libelle="Email">{client.email}</Info>
               <Info libelle="Pièce d'identité">{client.piece_identite}</Info>
               <Info libelle="Remarques">{client.notes}</Info>
             </dl>

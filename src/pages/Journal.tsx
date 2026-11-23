@@ -109,7 +109,7 @@ function LigneJournal({ entree: e, ouverte, basculer }: { entree: EntreeJournal;
       <div className="flex min-h-12 items-center gap-4">
         <div className="flex-1">
           <p className="flex flex-wrap items-center gap-2 text-lg font-semibold">
-            {libelleAction(e.action)}
+            {libelleAction(e.action, e.apres)}
             {e.sensible && <Pastille ton="alerte">à vérifier</Pastille>}
           </p>
           <p className="text-base text-gris">

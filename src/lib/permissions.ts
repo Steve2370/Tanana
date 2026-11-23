@@ -102,12 +102,16 @@ const LIBELLES_ACTIONS: Record<string, string> = {
   "sauvegarde.manuelle": "Copie de sécurité (manuelle)",
   "sauvegarde.automatique": "Copie de sécurité (automatique)",
   "sauvegarde.restauration": "Copie de sécurité remise (retour en arrière)",
-  "distance.activation": "Consultation à distance activée",
+  "distance.activation": "Travail à distance activé",
+  "distance.reprise": "Hôtel repris sur cet ordinateur (ordinateur de l'hôtel)",
   "distance.cle_affichee": "Clé de consultation à distance affichée",
   "distance.renvoi_complet": "Consultation à distance : tout renvoyé",
   "distance.desactivation": "Consultation à distance arrêtée",
 };
 
-export function libelleAction(action: string): string {
-  return LIBELLES_ACTIONS[action] ?? action;
+/** `apres` : détails de l'entrée ; une connexion faite depuis un autre ordinateur est dite « à distance ». */
+export function libelleAction(action: string, apres?: unknown): string {
+  const libelle = LIBELLES_ACTIONS[action] ?? action;
+  const methode = (apres as { methode?: unknown } | null | undefined)?.methode;
+  return action === "auth.connexion" && methode === "distance" ? `${libelle} à distance` : libelle;
 }

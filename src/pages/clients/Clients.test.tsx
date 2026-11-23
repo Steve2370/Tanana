@@ -197,7 +197,7 @@ describe("Clients : fiche", () => {
     rendreConnecte(<Clients />);
     await ouvrirFiche(/Mbarga Aline/);
     expect(screen.getByText("Téléphone").nextSibling).toHaveTextContent("690 00 00 00");
-    expect(screen.getByText("Courriel").nextSibling).toHaveTextContent("Non renseigné");
+    expect(screen.getByText("Email").nextSibling).toHaveTextContent("Non renseigné");
 
     const resume = await screen.findByRole("group", { name: "Résumé des séjours" });
     expect(within(resume).getByText("Séjours").nextSibling).toHaveTextContent("2"); // l'annulé ne compte pas
@@ -238,11 +238,11 @@ describe("Clients : fiche", () => {
     rendreConnecte(<Clients />);
     await ouvrirFiche(/Ngono Paul/);
     await userEvent.click(screen.getByRole("button", { name: "Modifier" }));
-    expect(screen.getByLabelText("Courriel (facultatif)")).toHaveValue("paul@exemple.cm");
-    await userEvent.clear(screen.getByLabelText("Courriel (facultatif)"));
+    expect(screen.getByLabelText("Email (facultatif)")).toHaveValue("paul@exemple.cm");
+    await userEvent.clear(screen.getByLabelText("Email (facultatif)"));
     await userEvent.click(screen.getByRole("button", { name: "Fermer sans enregistrer" }));
     expect(appel(appels, "modifier_client")).toBeUndefined();
-    expect(screen.getByText("Courriel").nextSibling).toHaveTextContent("paul@exemple.cm");
+    expect(screen.getByText("Email").nextSibling).toHaveTextContent("paul@exemple.cm");
 
     await userEvent.click(screen.getByRole("button", { name: "Modifier" }));
     await userEvent.clear(screen.getByLabelText("Téléphone (facultatif)"));
@@ -259,13 +259,13 @@ describe("Clients : fiche", () => {
     expect(screen.getByText("Téléphone").nextSibling).toHaveTextContent("655 99 88 77");
   });
 
-  it("affiche le refus de Rust (courriel invalide) sans fermer le formulaire", async () => {
-    simuler({ modifier_client: () => erreurRust({ code: "VALIDATION", details: "courriel invalide" }) });
+  it("affiche le refus de Rust (email invalide) sans fermer le formulaire", async () => {
+    simuler({ modifier_client: () => erreurRust({ code: "VALIDATION", details: "email invalide" }) });
     rendreConnecte(<Clients />);
     await ouvrirFiche(/Ngono Paul/);
     await userEvent.click(screen.getByRole("button", { name: "Modifier" }));
     await userEvent.click(screen.getByRole("button", { name: "Enregistrer les changements" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Courriel invalide.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Email invalide.");
     expect(screen.getByRole("form", { name: "Modifier la fiche" })).toBeInTheDocument();
   });
 

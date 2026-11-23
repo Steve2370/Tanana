@@ -42,7 +42,7 @@ fn valider(d: DonneesClient) -> Resultat<ClientValide> {
     if let Some(e) = &email
         && !courriel_plausible(e)
     {
-        return Err(Erreur::Validation("courriel invalide".into()));
+        return Err(Erreur::Validation("email invalide".into()));
     }
     Ok(ClientValide {
         nom: texte_requis(&d.nom, "le nom")?,
@@ -55,7 +55,7 @@ fn valider(d: DonneesClient) -> Resultat<ClientValide> {
 }
 
 impl Tanana {
-    /// Recherche par nom, prénom, téléphone ou courriel (vide = 200 derniers).
+    /// Recherche par nom, prénom, téléphone ou email (vide = 200 derniers).
     pub fn rechercher_clients(&mut self, token: &str, recherche: &str) -> Resultat<Vec<Client>> {
         self.executer(token, Some(Permission::ClientVoir), |tx, _| {
             let motif = format!("%{}%", recherche.trim().replace(['%', '_'], ""));

@@ -115,3 +115,8 @@ export function resteDesSejours(liste: { solde: number; solde_groupe: number | n
   }
   return reste + [...groupes.values()].reduce((a, b) => a + b, 0);
 }
+
+/** Même règle que `courriel_plausible` côté Rust : un @ au milieu, pas d'espace. */
+export function emailPlausible(e: string): boolean {
+  return e.includes("@") && !e.startsWith("@") && !e.endsWith("@") && !e.includes(" ");
+}

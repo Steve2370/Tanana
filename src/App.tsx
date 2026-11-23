@@ -1,32 +1,35 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { History, RotateCw } from "lucide-react";
 
 import type { EtatApplication } from "./bindings/EtatApplication";
 import { LogoComplet } from "./components/Logo";
 import { RemettreCopie } from "./components/restauration";
 import { Alerte, Bouton, Carte } from "./components/ui";
-import { api } from "./lib/api";
+import { api, definirModeDistant } from "./lib/api";
 import { versErreur } from "./lib/erreurs";
 import { FournisseurLectureSeule, useSession } from "./lib/session";
 import { ChangementMotDePasse } from "./pages/ChangementMotDePasse";
 import { CleManquante } from "./pages/CleManquante";
 import { Connexion } from "./pages/Connexion";
 import { Coquille } from "./pages/Coquille";
-import { CleManquanteCopie, ConnexionCopie } from "./pages/distance/ConsultationDistante";
+import { CleManquanteCopie, ConnexionDistante, PosteRemplace } from "./pages/distance/ConsultationDistante";
 import { PremierLancement } from "./pages/PremierLancement";
 
 /** Aiguillage au démarrage : clé manquante → premier lancement → connexion → app.
- *  Sur l'ordinateur d'un propriétaire qui consulte son hôtel à distance, même
- *  chemin, mais connexion par mot de passe seul et tout en lecture seule. */
+ *  Sur le poste à distance de l'administratrice, même chemin : connexion par
+ *  mot de passe, modifications envoyées à l'hôtel quand il est joignable. */
 export function App() {
-  const { session } = useSession();
+  const { session, rafraichir } = useSession();
   const [etat, setEtat] = useState<EtatApplication | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
+  const [modifications, setModifications] = useState(false);
 
   const charger = useCallback(async () => {
     try {
       setErreur(null);
-      setEtat(await api.etatApplication());
+      const e = await api.etatApplication();
+      definirModeDistant(e.consultation_distance);
+      setEtat(e);
     } catch (e) {
       setErreur(versErreur(e).message);
     }
@@ -36,6 +39,29 @@ export function App() {
     void charger();
   }, [charger]);
 
+  // L'hôtel devient joignable (ou ne l'est plus) : droits et écran suivent.
+  const modificationsActuelles = useRef(modifications);
+  modificationsActuelles.current = modifications;
+  const surLien = useCallback(
+    (possibles: boolean) => {
+      if (modificationsActuelles.current === possibles) return;
+      setModifications(possibles);
+      void rafraichir().catch(() => {});
+    },
+    [rafraichir],
+  );
+
+  // Ordinateur de l'hôtel : si un autre ordinateur l'a remplacé, on le saura en cours de route.
+  const surveiller = etat?.statut === "prete" && etat.initialise && !etat.consultation_distance && !etat.poste_remplace;
+  useEffect(() => {
+    if (!surveiller) return;
+    const minuterie = window.setInterval(async () => {
+      const e = await api.etatApplication().catch(() => null);
+      if (e?.poste_remplace) setEtat(e);
+    }, 60_000);
+    return () => window.clearInterval(minuterie);
+  }, [surveiller]);
+
   if (erreur || etat?.statut === "erreur") {
     return <ErreurDemarrage message={erreur ?? etat?.message ?? ""} base={etat?.statut === "erreur"} onReessayer={charger} />;
   }
@@ -43,12 +69,21 @@ export function App() {
   if (!etat) return <div className="h-full bg-papier" />;
   if (etat.statut === "cle_manquante")
     return etat.consultation_distance ? <CleManquanteCopie onOublie={charger} /> : <CleManquante onOuverte={charger} />;
+  if (etat.poste_remplace) return <PosteRemplace onFait={charger} />;
   if (!etat.initialise) return <PremierLancement onTermine={charger} />;
   if (etat.consultation_distance) {
-    if (!session) return <ConnexionCopie nomHotel={etat.nom_hotel} version={etat.version} onOublie={charger} />;
+    if (!session)
+      return (
+        <ConnexionDistante
+          nomHotel={etat.nom_hotel}
+          version={etat.version}
+          onOublie={charger}
+          onConnecte={(m) => setModifications(m)}
+        />
+      );
     return (
-      <FournisseurLectureSeule value>
-        <Coquille nomHotel={etat.nom_hotel ?? "Tanana"} />
+      <FournisseurLectureSeule value={!modifications}>
+        <Coquille nomHotel={etat.nom_hotel ?? "Tanana"} distant={{ modifications, onLien: surLien }} />
       </FournisseurLectureSeule>
     );
   }

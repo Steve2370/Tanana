@@ -88,6 +88,11 @@ impl Secret {
         hex::encode(self.deriver(b"jeton-lecture"))
     }
 
+    /// Jeton des actions d'administrateur à distance (modifier, reprendre l'hôtel).
+    pub fn jeton_admin(&self) -> String {
+        hex::encode(self.deriver(b"jeton-admin"))
+    }
+
     fn chiffreur(&self) -> XChaCha20Poly1305 {
         XChaCha20Poly1305::new(&self.deriver(b"chiffrement").into())
     }
@@ -123,6 +128,93 @@ impl Secret {
         DeflateDecoder::new(&compresse[..]).take(DECOMPRESSE_MAX).read_to_end(&mut clair).map_err(|_| illisible())?;
         Ok(clair)
     }
+}
+
+// ───────────────────── Coffre d'accès (identifiant + mot de passe) ─────────────────────
+
+/// Clé de recherche d'un compte sur le relais : il ne voit pas l'identifiant.
+pub fn recherche_compte(identifiant: &str) -> String {
+    use sha2::Digest;
+    hex::encode(Sha256::digest(format!("tanana-acces-v1|{}", identifiant.trim().to_lowercase()).as_bytes()))
+}
+
+/// Deux clés tirées du mot de passe (Argon2id, lent exprès) :
+/// la « preuve » montrée au relais, et la clé qui ouvre le coffre.
+pub struct ClesMotDePasse {
+    pub preuve: String,
+    coffre: [u8; 32],
+}
+
+impl ClesMotDePasse {
+    pub fn deriver(mot_de_passe: &str, sel: &[u8]) -> Resultat<Self> {
+        let mut sortie = [0u8; 64];
+        argon2::Argon2::default()
+            .hash_password_into(mot_de_passe.as_bytes(), sel, &mut sortie)
+            .map_err(|e| Erreur::Base(format!("argon2 : {e}")))?;
+        let mut coffre = [0u8; 32];
+        coffre.copy_from_slice(&sortie[32..]);
+        Ok(Self { preuve: hex::encode(&sortie[..32]), coffre })
+    }
+
+    /// Clé du coffre, à garder localement (hex).
+    pub fn cle_coffre_hex(&self) -> String {
+        hex::encode(self.coffre)
+    }
+
+    /// Reprend des clés gardées localement (preuve et clé du coffre, en hex).
+    pub fn depuis_hex(preuve: &str, cle_coffre: &str) -> Resultat<Self> {
+        let octets = hex::decode(cle_coffre).ok().and_then(|v| <[u8; 32]>::try_from(v).ok());
+        let coffre = octets.ok_or_else(|| Erreur::Base("clé de coffre illisible".into()))?;
+        Ok(Self { preuve: preuve.to_string(), coffre })
+    }
+
+    /// Empreinte de la preuve, gardée par le relais.
+    pub fn verif(&self) -> String {
+        use sha2::Digest;
+        hex::encode(Sha256::digest(self.preuve.as_bytes()))
+    }
+
+    fn chiffreur(&self) -> XChaCha20Poly1305 {
+        XChaCha20Poly1305::new(&self.coffre.into())
+    }
+
+    pub fn fermer(&self, clair: &[u8], associe: &str) -> Resultat<(String, String)> {
+        let mut nonce = [0u8; 24];
+        getrandom::fill(&mut nonce).map_err(|e| Erreur::Base(format!("hasard indisponible : {e}")))?;
+        let chiffre = self
+            .chiffreur()
+            .encrypt(XNonce::from_slice(&nonce), Payload { msg: clair, aad: associe.as_bytes() })
+            .map_err(|_| Erreur::Base("chiffrement impossible".into()))?;
+        Ok((BASE64.encode(&nonce), BASE64.encode(&chiffre)))
+    }
+
+    pub fn ouvrir(&self, nonce: &str, chiffre: &str, associe: &str) -> Resultat<Vec<u8>> {
+        let illisible = || Erreur::IdentifiantsInvalides;
+        let nonce = BASE64.decode(nonce.as_bytes()).map_err(|_| illisible())?;
+        if nonce.len() != 24 {
+            return Err(illisible());
+        }
+        let chiffre = BASE64.decode(chiffre.as_bytes()).map_err(|_| illisible())?;
+        self.chiffreur()
+            .decrypt(XNonce::from_slice(&nonce), Payload { msg: &chiffre, aad: associe.as_bytes() })
+            .map_err(|_| illisible())
+    }
+}
+
+pub fn associe_coffre(recherche: &str) -> String {
+    format!("tanana-coffre-v1|{recherche}")
+}
+
+pub fn associe_instantane(hotel_id: &str, apres_numero: i64) -> String {
+    format!("tanana-instantane-v1|{hotel_id}|{apres_numero}")
+}
+
+pub fn associe_commande(hotel_id: &str, id: &str) -> String {
+    format!("tanana-commande-v1|{hotel_id}|{id}")
+}
+
+pub fn associe_reponse(hotel_id: &str, id: &str) -> String {
+    format!("tanana-reponse-v1|{hotel_id}|{id}")
 }
 
 /// Données associées d'un lot : liées au chiffrement, vérifiées au déchiffrement.
@@ -180,11 +272,38 @@ mod tests {
     }
 
     #[test]
+    fn coffre_ouvert_seulement_par_le_bon_mot_de_passe() {
+        let sel = [7u8; 16];
+        let cles = ClesMotDePasse::deriver("Madagascar2026", &sel).unwrap();
+        assert_eq!(cles.preuve.len(), 64);
+        let (n, c) = cles.fermer(b"contenu", "a").unwrap();
+        assert_eq!(cles.ouvrir(&n, &c, "a").unwrap(), b"contenu");
+        // Même mot de passe et même sel : mêmes clés
+        assert_eq!(ClesMotDePasse::deriver("Madagascar2026", &sel).unwrap().preuve, cles.preuve);
+        let mauvais = ClesMotDePasse::deriver("madagascar2026", &sel).unwrap();
+        assert_ne!(mauvais.preuve, cles.preuve);
+        assert!(matches!(mauvais.ouvrir(&n, &c, "a"), Err(Erreur::IdentifiantsInvalides)));
+        assert!(cles.ouvrir(&n, &c, "b").is_err(), "coffre d'un autre compte");
+        // Un autre sel donne d'autres clés
+        assert_ne!(ClesMotDePasse::deriver("Madagascar2026", &[8u8; 16]).unwrap().preuve, cles.preuve);
+        // La preuve ne révèle pas la clé du coffre ; le relais n'en garde que l'empreinte
+        assert_ne!(cles.verif(), cles.preuve);
+    }
+
+    #[test]
+    fn recherche_insensible_a_la_casse() {
+        assert_eq!(recherche_compte(" Admin "), recherche_compte("admin"));
+        assert_ne!(recherche_compte("admin"), recherche_compte("admin2"));
+        assert_eq!(recherche_compte("admin").len(), 64);
+    }
+
+    #[test]
     fn le_jeton_de_lecture_ne_revele_pas_la_cle() {
         let s = Secret::generer().unwrap();
         let jeton = s.jeton_lecture();
         assert_eq!(jeton.len(), 64);
         assert_ne!(jeton, hex::encode(s.deriver(b"chiffrement")));
         assert_eq!(jeton, Secret::lire(&s.afficher()).unwrap().jeton_lecture(), "stable");
+        assert_ne!(s.jeton_admin(), jeton, "jeton d'administrateur distinct");
     }
 }

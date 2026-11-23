@@ -167,6 +167,42 @@ describe("Nouvelle réservation", () => {
     expect(appels.some((a) => a.commande === "creer_client")).toBe(false);
   });
 
+  it("le nouveau client peut avoir un email, affiché une fois choisi", async () => {
+    const nouveau = { ...MBARGA, id: "cl9", nom: "Ngono", prenom: null, telephone: null, email: "ngono@exemple.com" };
+    const appels = simuler({ rechercher_clients: () => [], creer_client: () => nouveau });
+    await ouvrirFormulaire();
+    await userEvent.type(screen.getByLabelText("Chercher un client déjà venu"), "Ngono");
+    await userEvent.click(await screen.findByRole("button", { name: "C'est un nouveau client" }));
+    await userEvent.type(screen.getByLabelText("Email"), "  ngono@exemple.com ");
+    await userEvent.click(screen.getByRole("button", { name: "Enregistrer ce client" }));
+    await waitFor(() =>
+      expect(appels.find((a) => a.commande === "creer_client")?.args).toMatchObject({ donnees: { nom: "Ngono", email: "ngono@exemple.com" } }),
+    );
+    expect(await screen.findByText("Email : ngono@exemple.com")).toBeInTheDocument();
+  });
+
+  it("un email mal écrit est signalé avant d'enregistrer", async () => {
+    const appels = simuler({ rechercher_clients: () => [] });
+    await ouvrirFormulaire();
+    await userEvent.type(screen.getByLabelText("Chercher un client déjà venu"), "Ngono");
+    await userEvent.click(await screen.findByRole("button", { name: "C'est un nouveau client" }));
+    await userEvent.type(screen.getByLabelText("Email"), "ngono exemple.com");
+    await userEvent.click(screen.getByRole("button", { name: "Enregistrer ce client" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("L'email n'est pas valide. Écrivez-le comme ceci : nom@exemple.com");
+    expect(appels.some((a) => a.commande === "creer_client")).toBe(false);
+  });
+
+  it("sans email, le nouveau client est créé avec un email vide", async () => {
+    const nouveau = { ...MBARGA, id: "cl9", nom: "Ngono", prenom: null, telephone: null, email: null };
+    const appels = simuler({ rechercher_clients: () => [], creer_client: () => nouveau });
+    await ouvrirFormulaire();
+    await userEvent.type(screen.getByLabelText("Chercher un client déjà venu"), "Ngono");
+    await userEvent.click(await screen.findByRole("button", { name: "C'est un nouveau client" }));
+    await userEvent.click(screen.getByRole("button", { name: "Enregistrer ce client" }));
+    await waitFor(() => expect(appels.find((a) => a.commande === "creer_client")?.args).toMatchObject({ donnees: { email: null } }));
+    expect(screen.queryByText(/^Email :/)).not.toBeInTheDocument();
+  });
+
   it("sans le droit de créer des clients, on ne peut que chercher", async () => {
     simuler();
     rendreConnecte(<Reservations />, session(["reservation.voir", "reservation.creer", "chambre.voir", "client.voir"], { role_id: "role-x" }));

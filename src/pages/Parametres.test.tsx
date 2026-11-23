@@ -27,7 +27,7 @@ function simuler(depart: P = PARAMETRES, taxes: Taxe[] = []) {
     ma_session: () => session(),
     modifier_parametres: ({ donnees }) => {
       const d = donnees as P;
-      if (d.email_hotel && !d.email_hotel.includes("@")) erreurRust({ code: "VALIDATION", details: "courriel de l'hôtel invalide" });
+      if (d.email_hotel && !d.email_hotel.includes("@")) erreurRust({ code: "VALIDATION", details: "email de l'hôtel invalide" });
       return (etat.p = d);
     },
   });
@@ -37,14 +37,14 @@ function simuler(depart: P = PARAMETRES, taxes: Taxe[] = []) {
 const formulaire = () => screen.findByRole("form", { name: "Informations de l'hôtel" });
 
 describe("Réglages : informations imprimées sur les reçus et factures", () => {
-  it("enregistre l'adresse, le téléphone, le courriel et les mentions", async () => {
+  it("enregistre l'adresse, le téléphone, l'email et les mentions", async () => {
     const { appels } = simuler();
     rendreConnecte(<Parametres />);
     const f = within(await formulaire());
     expect(f.getByText("Sur les reçus et factures")).toBeInTheDocument();
     await userEvent.type(f.getByLabelText("Adresse (facultatif)"), "12 rue du Lac{Enter}Bonapriso, Douala");
     await userEvent.type(f.getByLabelText("Téléphone (facultatif)"), "+237 233 00 00 00");
-    await userEvent.type(f.getByLabelText("Courriel (facultatif)"), "  accueil@hotel.cm ");
+    await userEvent.type(f.getByLabelText("Email (facultatif)"), "  accueil@hotel.cm ");
     await userEvent.type(f.getByLabelText("Mentions en bas de page (facultatif)"), "NIU : M0123");
     await userEvent.click(f.getByRole("button", { name: "Enregistrer" }));
 
@@ -78,10 +78,10 @@ describe("Réglages : informations imprimées sur les reçus et factures", () =>
     simuler();
     rendreConnecte(<Parametres />);
     const f = within(await formulaire());
-    await userEvent.type(f.getByLabelText("Courriel (facultatif)"), "hotel.cm");
+    await userEvent.type(f.getByLabelText("Email (facultatif)"), "hotel.cm");
     await userEvent.click(f.getByRole("button", { name: "Enregistrer" }));
-    expect(await f.findByRole("alert")).toHaveTextContent("Courriel de l'hôtel invalide.");
-    await userEvent.type(f.getByLabelText("Courriel (facultatif)"), "x");
+    expect(await f.findByRole("alert")).toHaveTextContent("Email de l'hôtel invalide.");
+    await userEvent.type(f.getByLabelText("Email (facultatif)"), "x");
     expect(f.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -158,11 +158,11 @@ describe("Réglages : taxes de l'hôtel", () => {
   });
 });
 
-describe("Réglages : la consultation à distance a sa carte", () => {
+describe("Réglages : le travail à distance a sa carte", () => {
   it("est proposée à l'administrateur", async () => {
     simuler();
     rendreConnecte(<Parametres />);
-    expect(await screen.findByRole("form", { name: "Activer la consultation à distance" })).toBeInTheDocument();
+    expect(await screen.findByRole("form", { name: "Relier l'hôtel au serveur" })).toBeInTheDocument();
   });
 });
 

@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Toutes les erreurs que l'interface peut recevoir.
 ///
 /// Sérialisée en `{ "code": "...", "details": ... }` pour que le frontend
 /// affiche un message adapté sans analyser du texte.
-#[derive(Debug, thiserror::Error, Serialize, TS, PartialEq)]
+#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize, TS, PartialEq)]
 #[serde(tag = "code", content = "details", rename_all = "SCREAMING_SNAKE_CASE")]
 #[ts(export)]
 pub enum Erreur {
@@ -59,6 +59,21 @@ pub enum Erreur {
     CleDistanceIncorrecte,
     #[error("Consultation à distance : modification impossible")]
     LectureSeule,
+    /// Un autre ordinateur est devenu l'ordinateur principal de l'hôtel.
+    #[error("Cet ordinateur n'est plus l'ordinateur principal de l'hôtel")]
+    PosteRemplace,
+    /// Modification à distance : l'ordinateur de l'hôtel n'est pas en ligne.
+    #[error("L'ordinateur de l'hôtel n'est pas joignable")]
+    HotelInjoignable,
+    /// Modification à distance envoyée, mais aucune réponse n'est revenue.
+    #[error("L'ordinateur de l'hôtel n'a pas répondu")]
+    PasDeReponseHotel,
+    /// Trop de mots de passe incorrects pour ce compte (relais).
+    #[error("Trop d'essais : réessayez dans 15 minutes")]
+    TropDEssais,
+    /// « Retrouver mon hôtel » : l'ancien ordinateur n'a encore envoyé aucune copie complète.
+    #[error("Aucune copie complète de l'hôtel sur le serveur")]
+    InstantaneAbsent,
     #[error("Impossible d'enregistrer le fichier : {0}")]
     EnregistrementImpossible(String),
     #[error("Erreur de base de données : {0}")]

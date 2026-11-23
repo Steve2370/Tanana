@@ -1,14 +1,23 @@
 /** Consultation à distance : petites aides partagées par l'hôtel et l'administrateur. */
 
-/** Serveur proposé par défaut. Réglé au moment de construire l'application
- *  (variable VITE_TANANA_RELAIS) ; vide = la personne le tape. */
-export const ADRESSE_RELAIS_DEFAUT: string = (import.meta.env.VITE_TANANA_RELAIS ?? "").trim();
+/** Serveur de l'hôtel, déjà rempli partout. Peut être changé au moment de
+ *  construire l'application (variable VITE_TANANA_RELAIS). */
+export const ADRESSE_RELAIS_DEFAUT: string =
+  (import.meta.env.VITE_TANANA_RELAIS ?? "").trim() || "https://relais.monkadran.com";
+
+/** Code d'invitation du serveur, donné à la construction (variable VITE_TANANA_CODE_INVITATION). */
+export const CODE_INVITATION_DEFAUT: string | null = (import.meta.env.VITE_TANANA_CODE_INVITATION ?? "").trim() || null;
+
+/** Adresse sans « https:// », pour l'afficher simplement. */
+export function adresseCourte(adresse: string): string {
+  return adresse.replace(/^https?:\/\//i, "");
+}
 
 /** Au-delà, on prévient que l'hôtel ne donne plus de nouvelles. */
 export const SILENCE_INQUIETANT_MS = 3 * 3600_000;
 
-/** Mise à jour automatique de la copie consultée. */
-export const MISE_A_JOUR_AUTO_MS = 5 * 60_000;
+/** L'écran du poste à distance regarde s'il y a du nouveau (la copie, elle, se met à jour toute seule). */
+export const MISE_A_JOUR_AUTO_MS = 15_000;
 
 /** Nettoie une adresse tapée à la main : espaces, « / » final, https:// ajouté si oublié
  *  (http:// pour un serveur d'essai sur cet ordinateur, le seul cas où Rust l'accepte). */

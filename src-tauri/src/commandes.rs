@@ -13,14 +13,14 @@ use tanana_core::{Erreur, Resultat};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::documents::{self, DocumentEnregistre};
+use crate::documents::{self, DocumentEnregistre, PdfARanger};
 use crate::etat::{Demandeur, RestaurationFaite, SauvegardeDisponible};
 use crate::etat::{Etat, EtatApplication};
-use tanana_core::distance::chiffrement::Secret;
+use tanana_core::distance::acces::ouvrir_acces_distant;
+use tanana_core::distance::commandes::DocumentTransmis;
+use tanana_core::distance::principal::trouver_hotel;
 use tanana_core::distance::relais::{Relais as _, RelaisHttp};
-use tanana_core::distance::{
-    BilanEnvoi, CodesDistance, EtatCopie, EtatDistance, normaliser_identifiant_hotel, verifier_cle,
-};
+use tanana_core::distance::{BilanEnvoi, CodesDistance, EtatCopie, EtatDistance};
 use tanana_core::restauration::ApercuSauvegarde;
 
 /// Déclare une commande qui exige une session : `token` est toujours le premier argument.
@@ -48,9 +48,21 @@ pub fn fournir_cle(etat: State<'_, Etat>, cle: String) -> Resultat<()> {
     etat.fournir_cle(&cle)
 }
 
+/// Crée l'hôtel. `relais` : serveur auquel le relier tout seul dès qu'Internet est là.
 #[tauri::command(async, rename_all = "snake_case")]
-pub fn initialiser(etat: State<'_, Etat>, configuration: ConfigurationInitiale) -> Resultat<String> {
-    etat.avec(|t| t.initialiser(configuration))
+pub fn initialiser(
+    etat: State<'_, Etat>,
+    configuration: ConfigurationInitiale,
+    relais: Option<String>,
+    code_invitation: Option<String>,
+) -> Resultat<String> {
+    etat.avec(|t| {
+        let code = t.initialiser(configuration)?;
+        if let Some(r) = relais.as_deref() {
+            t.programmer_activation_auto(r, code_invitation.as_deref())?;
+        }
+        Ok(code)
+    })
 }
 
 #[tauri::command(async, rename_all = "snake_case")]
@@ -75,8 +87,35 @@ pub fn connexion_pin(etat: State<'_, Etat>, identifiant: String, pin: String) ->
     etat.avec(|t| t.connexion_pin(&identifiant, &pin))
 }
 
-commande!(deconnexion() -> () => |t, tok| t.deconnexion(tok));
-commande!(ma_session() -> SessionOuverte => |t, tok| t.ma_session(tok));
+/// Déconnexion. Sur le poste à distance, la session sur l'hôtel est fermée
+/// aussi (sans faire attendre l'écran) et le mot de passe oublié.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn deconnexion(app: AppHandle, etat: State<'_, Etat>, token: String) -> Resultat<()> {
+    etat.avec(|t| t.deconnexion(&token))?;
+    let lien = etat.distant.lock().ok().map(|mut d| std::mem::take(&mut *d));
+    if let Some(s) = lien.and_then(|l| l.session_hotel) {
+        std::thread::spawn(move || {
+            let mut args = serde_json::Map::new();
+            args.insert("token".into(), serde_json::Value::String(s.token));
+            let _ = crate::distance::envoyer_commande(&app.state::<Etat>(), "deconnexion", args);
+        });
+    }
+    Ok(())
+}
+/// Session courante. Sur le poste à distance relié à l'hôtel : l'utilisateur
+/// et les droits sont ceux de l'hôtel (sinon, consultation seulement).
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn ma_session(etat: State<'_, Etat>, token: String) -> Resultat<SessionOuverte> {
+    let (locale, copie) = etat.avec(|t| Ok((t.ma_session(&token)?, t.est_une_copie())))?;
+    if !copie {
+        return Ok(locale);
+    }
+    let hotel = etat.distant.lock().ok().and_then(|d| d.session_hotel.clone());
+    Ok(match hotel {
+        Some(h) => SessionOuverte { token: locale.token, utilisateur: h.utilisateur, permissions: h.permissions },
+        None => locale,
+    })
+}
 commande!(changer_mon_mot_de_passe(actuel: String, nouveau: String) -> () =>
     |t, tok| t.changer_mon_mot_de_passe(tok, &actuel, &nouveau));
 commande!(definir_mon_pin(mot_de_passe: String, pin: String) -> () =>
@@ -330,39 +369,204 @@ pub fn desactiver_distance(etat: State<'_, Etat>, token: String) -> Resultat<boo
     }
 }
 
-// ───────────────────────────── Consultation à distance : l'administrateur ─────────────────────────────
+// ───────────────────────────── Mise en route : créer ou retrouver l'hôtel ─────────────────────────────
 
-/// Fait de cet ordinateur un poste de consultation : vérifie la clé auprès du relais,
-/// crée la copie protégée par `mot_de_passe`, puis télécharge les données.
-/// Renvoie un avertissement si le premier téléchargement n'a pas pu se faire.
+// À la création de l'hôtel : le relier au serveur dès qu'Internet est là.
+commande!(demander_activation_auto(relais: String, code_invitation: Option<String>) -> () =>
+    |t, tok| t.demander_activation_auto(tok, &relais, code_invitation.as_deref()));
+
+/// Ce que l'app montre avant de reprendre l'hôtel.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct HotelTrouve {
+    /// Heure de la dernière copie complète reçue par le serveur (RFC 3339)
+    pub copie_du: String,
+}
+
+/// « Retrouver mon hôtel », étape 1 : vérifie l'identifiant et le mot de passe
+/// auprès du serveur. Rien ne change encore.
 #[tauri::command(async, rename_all = "snake_case")]
-pub fn consulter_hotel_distant(
+pub fn retrouver_hotel(
     etat: State<'_, Etat>,
     adresse: String,
-    hotel_id: String,
-    cle_secrete: String,
+    identifiant: String,
+    mot_de_passe: String,
+) -> Resultat<HotelTrouve> {
+    if etat.hotel_installe() {
+        return Err(Erreur::DejaInitialise);
+    }
+    let relais = RelaisHttp::new(&adresse)?;
+    let trouve = trouver_hotel(&relais, &identifiant, &mot_de_passe)?;
+    let info = HotelTrouve { copie_du: trouve.instantane_du.clone() };
+    *etat.retrouve.lock().map_err(|_| Erreur::Base("verrou".into()))? = Some((adresse, trouve));
+    Ok(info)
+}
+
+/// « Retrouver mon hôtel », étape 2 : cet ordinateur devient l'ordinateur de l'hôtel.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn confirmer_reprise(etat: State<'_, Etat>) -> Resultat<()> {
+    let attente = etat.retrouve.lock().map_err(|_| Erreur::Base("verrou".into()))?.clone();
+    let (adresse, trouve) =
+        attente.ok_or_else(|| Erreur::Validation("recommencez : identifiant et mot de passe".into()))?;
+    etat.reprendre(&adresse, &trouve)?;
+    *etat.retrouve.lock().map_err(|_| Erreur::Base("verrou".into()))? = None;
+    // Premier envoi tout de suite (le nouveau jeton), sans faire attendre l'écran
+    Ok(())
+}
+
+/// Un autre ordinateur est devenu celui de l'hôtel : on met la base de côté
+/// et cet ordinateur revient au premier lancement.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn abandonner_poste(etat: State<'_, Etat>) -> Resultat<String> {
+    etat.abandonner_poste().map(|p| p.display().to_string())
+}
+
+// ───────────────────────────── Travail à distance ─────────────────────────────
+
+/// Fait de cet ordinateur un poste à distance : ouvre le coffre avec
+/// l'identifiant et le mot de passe, crée la copie (protégée par le même mot
+/// de passe), puis la télécharge. Renvoie un avertissement si le premier
+/// téléchargement n'a pas pu se faire.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn travailler_a_distance(
+    etat: State<'_, Etat>,
+    adresse: String,
+    identifiant: String,
     mot_de_passe: String,
 ) -> Resultat<Option<String>> {
-    tanana_core::domaine::valider_mot_de_passe(&mot_de_passe)?;
-    let hotel_id = normaliser_identifiant_hotel(&hotel_id);
-    let secret = Secret::lire(&cle_secrete)?;
     let relais = RelaisHttp::new(&adresse)?;
-    verifier_cle(&relais, &hotel_id, &secret)?;
+    let (hotel_id, secret) = ouvrir_acces_distant(&relais, &identifiant, &mot_de_passe)?;
     etat.creer_copie(&adresse, &hotel_id, &secret, &mot_de_passe)?;
+    etat.avec(|t| t.definir_identifiant_copie(&identifiant))?;
     Ok(crate::distance::mettre_a_jour_copie(&etat).err().map(|e| e.to_string()))
 }
 
-/// Oublie l'hôtel consulté (mot de passe oublié, clé perdue) pour le rattacher à nouveau.
-/// Sans session : c'est justement quand on ne peut plus se connecter qu'on en a besoin,
-/// et cela ne donne accès à rien (il faudra la clé secrète notée sur papier).
+/// Oublie l'hôtel (mot de passe oublié) pour le rattacher à nouveau. Sans
+/// session : c'est justement quand on ne peut plus se connecter qu'on en a
+/// besoin, et cela ne donne accès à rien.
 #[tauri::command(async, rename_all = "snake_case")]
 pub fn oublier_hotel_distant(etat: State<'_, Etat>) -> Resultat<()> {
+    if let Ok(mut d) = etat.distant.lock() {
+        *d = Default::default();
+    }
     etat.oublier_copie()
 }
 
+/// Connexion sur le poste à distance.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct ConnexionDistante {
+    pub session: SessionOuverte,
+    /// L'hôtel a répondu : les modifications sont possibles.
+    pub modifications_possibles: bool,
+    /// Sinon, pourquoi (message pour la personne).
+    pub raison: Option<String>,
+}
+
+/// Connexion à distance : le mot de passe ouvre la copie de cet ordinateur,
+/// puis une session sur l'ordinateur de l'hôtel (si l'hôtel est joignable).
+/// Si le mot de passe a changé à l'hôtel, le serveur le confirme et la copie
+/// suit.
 #[tauri::command(async, rename_all = "snake_case")]
-pub fn connexion_copie(etat: State<'_, Etat>, mot_de_passe: String) -> Resultat<SessionOuverte> {
-    etat.avec(|t| t.connexion_copie(&mot_de_passe))
+pub fn connexion_distante(etat: State<'_, Etat>, mot_de_passe: String) -> Resultat<ConnexionDistante> {
+    let identifiant = etat.avec(|t| t.identifiant_copie())?;
+    let locale = match etat.avec(|t| t.connexion_copie(&mot_de_passe)) {
+        Ok(s) => s,
+        Err(Erreur::IdentifiantsInvalides) if identifiant.is_some() => {
+            // Mot de passe changé à l'hôtel ? Le serveur sait le vérifier.
+            let id = identifiant.clone().unwrap_or_default();
+            let adresse = etat.avec(|t| t.preparer_lecture_copie().map(|p| p.relais))?;
+            let hotel = etat.avec(|t| t.etat_copie().map(|e| e.hotel_id))?;
+            match RelaisHttp::new(&adresse).and_then(|r| ouvrir_acces_distant(&r, &id, &mot_de_passe)) {
+                Ok((h, _)) if h == hotel => {
+                    etat.avec(|t| t.definir_acces_copie(&mot_de_passe))?;
+                    etat.avec(|t| t.connexion_copie(&mot_de_passe))?
+                }
+                _ => return Err(Erreur::IdentifiantsInvalides),
+            }
+        }
+        Err(e) => return Err(e),
+    };
+    let Some(identifiant) = identifiant else {
+        // Copie d'avant la connexion par identifiant : consultation seulement
+        return Ok(ConnexionDistante {
+            session: locale,
+            modifications_possibles: false,
+            raison: Some("Reliez à nouveau cet ordinateur pour pouvoir modifier.".into()),
+        });
+    };
+    if let Ok(mut d) = etat.distant.lock() {
+        *d = crate::etat::LienDistant {
+            identifiant: Some(identifiant.clone()),
+            mot_de_passe: Some(mot_de_passe.clone()),
+            session_hotel: None,
+        };
+    }
+    match crate::distance::connecter_a_l_hotel(&etat, &identifiant, &mot_de_passe) {
+        Ok(s) => Ok(ConnexionDistante {
+            session: SessionOuverte { token: locale.token, utilisateur: s.utilisateur, permissions: s.permissions },
+            modifications_possibles: true,
+            raison: None,
+        }),
+        Err(e) => {
+            // Mauvais identifiants pour l'hôtel : inutile de réessayer tout seul
+            if matches!(e, Erreur::IdentifiantsInvalides | Erreur::CompteInactif | Erreur::CompteBloque { .. })
+                && let Ok(mut d) = etat.distant.lock()
+            {
+                d.mot_de_passe = None;
+            }
+            Ok(ConnexionDistante { session: locale, modifications_possibles: false, raison: Some(e.to_string()) })
+        }
+    }
+}
+
+/// État du lien avec l'hôtel, pour le bandeau du poste à distance.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct LienHotel {
+    pub modifications_possibles: bool,
+    /// Utilisateur et droits à l'hôtel (absent si l'hôtel n'a pas encore répondu)
+    pub session_hotel: Option<SessionOuverte>,
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn lien_hotel(etat: State<'_, Etat>, token: String) -> Resultat<LienHotel> {
+    etat.avec(|t| t.ma_session(&token))?;
+    let session = etat.distant.lock().ok().and_then(|d| d.session_hotel.clone());
+    Ok(LienHotel { modifications_possibles: session.is_some(), session_hotel: session })
+}
+
+/// Une modification faite à distance : elle part vers l'ordinateur de l'hôtel,
+/// qui l'exécute avec la session de la personne. Mêmes noms et mêmes
+/// arguments que les commandes habituelles (sans `token`).
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn commande_distante(
+    etat: State<'_, Etat>,
+    token: String,
+    commande: String,
+    args: serde_json::Map<String, serde_json::Value>,
+) -> Resultat<serde_json::Value> {
+    etat.avec(|t| {
+        if !t.est_une_copie() {
+            return Err(Erreur::Validation("cet ordinateur est celui de l'hôtel".into()));
+        }
+        t.ma_session(&token).map(|_| ())
+    })?;
+    if !tanana_core::distance::commandes::ENVOYEES_A_L_HOTEL.contains(&commande.as_str()) {
+        return Err(Erreur::Validation(format!("« {commande} » ne se fait pas à distance")));
+    }
+    let nouveau_mdp = (commande == "changer_mon_mot_de_passe")
+        .then(|| args.get("nouveau").and_then(|v| v.as_str()).map(String::from))
+        .flatten();
+    let resultat = crate::distance::modifier_a_distance(&etat, &commande, args)?;
+    // Mot de passe changé à l'hôtel : il protège aussi la copie de cet ordinateur
+    if let Some(n) = nouveau_mdp {
+        etat.avec(|t| t.definir_acces_copie(&n))?;
+        if let Ok(mut d) = etat.distant.lock() {
+            d.mot_de_passe = Some(n);
+        }
+    }
+    Ok(resultat)
 }
 
 #[tauri::command(async, rename_all = "snake_case")]
@@ -398,10 +602,7 @@ fn racine_documents(app: &AppHandle) -> Resultat<(PathBuf, &'static str)> {
 }
 
 /// Range le PDF dans Documents › Tanana, puis l'ouvre avec le lecteur PDF du système.
-fn ranger_et_ouvrir(
-    app: &AppHandle,
-    d: tanana_core::services::documents::DocumentImprime,
-) -> Resultat<DocumentEnregistre> {
+fn ranger_et_ouvrir(app: &AppHandle, d: PdfARanger) -> Resultat<DocumentEnregistre> {
     let (dossier, racine) = racine_documents(app)?;
     let chemin = documents::enregistrer(&dossier, &d)?;
     let ouvert = match app.opener().open_path(chemin.display().to_string(), None::<&str>) {
@@ -414,6 +615,20 @@ fn ranger_et_ouvrir(
     Ok(documents::resultat(d, racine, chemin, ouvert))
 }
 
+/// Travail à distance : le reçu ou la facture est fait à l'hôtel (numéro,
+/// journal), puis rangé sur cet ordinateur.
+fn document_de_l_hotel(
+    etat: &Etat,
+    token: &str,
+    commande: &str,
+    args: serde_json::Map<String, serde_json::Value>,
+) -> Resultat<PdfARanger> {
+    etat.avec(|t| t.ma_session(token).map(|_| ()))?;
+    let v = crate::distance::modifier_a_distance(etat, commande, args)?;
+    let d: DocumentTransmis = serde_json::from_value(v)?;
+    PdfARanger::try_from(d)
+}
+
 #[tauri::command(async, rename_all = "snake_case")]
 pub fn imprimer_recu(
     app: AppHandle,
@@ -422,7 +637,14 @@ pub fn imprimer_recu(
     paiement_id: String,
     decalage_utc_minutes: i32,
 ) -> Resultat<DocumentEnregistre> {
-    let d = etat.avec(|t| t.imprimer_recu(&token, &paiement_id, decalage_utc_minutes))?;
+    let d = if etat.avec(|t| Ok(t.est_une_copie()))? {
+        let mut args = serde_json::Map::new();
+        args.insert("paiement_id".into(), paiement_id.into());
+        args.insert("decalage_utc_minutes".into(), decalage_utc_minutes.into());
+        document_de_l_hotel(&etat, &token, "imprimer_recu", args)?
+    } else {
+        etat.avec(|t| t.imprimer_recu(&token, &paiement_id, decalage_utc_minutes))?.into()
+    };
     ranger_et_ouvrir(&app, d)
 }
 
@@ -434,7 +656,14 @@ pub fn imprimer_facture(
     reservation_id: String,
     decalage_utc_minutes: i32,
 ) -> Resultat<DocumentEnregistre> {
-    let d = etat.avec(|t| t.imprimer_facture(&token, &reservation_id, decalage_utc_minutes))?;
+    let d = if etat.avec(|t| Ok(t.est_une_copie()))? {
+        let mut args = serde_json::Map::new();
+        args.insert("reservation_id".into(), reservation_id.into());
+        args.insert("decalage_utc_minutes".into(), decalage_utc_minutes.into());
+        document_de_l_hotel(&etat, &token, "imprimer_facture", args)?
+    } else {
+        etat.avec(|t| t.imprimer_facture(&token, &reservation_id, decalage_utc_minutes))?.into()
+    };
     ranger_et_ouvrir(&app, d)
 }
 

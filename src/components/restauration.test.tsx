@@ -184,7 +184,7 @@ describe("Ordinateur neuf ou données illisibles", () => {
       },
     });
     demarrer();
-    await userEvent.click(await screen.findByRole("button", { name: "Remettre une copie de sécurité" }));
+    await userEvent.click(await screen.findByRole("button", { name: /copie de sécurité sur clé USB/ }));
     expect(screen.getByText(/Branchez la clé USB/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Choisir le fichier…" }));
     await userEvent.type(await screen.findByLabelText("Clé de protection (64 caractères)"), CLE_AUTRE);

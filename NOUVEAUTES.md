@@ -1,5 +1,4 @@
-- Réserver plusieurs chambres pour un même client (équipe, entreprise) : un seul compte, une seule facture avec toutes les chambres.
-- Logo de l'hôtel : en haut à gauche, à côté du nom, et sur les reçus et factures (Réglages › Logo de l'hôtel).
-- Caisse : un employé sans accès aux montants voit un message clair au lieu d'un onglet qui disparaît.
-- Installation Windows en français.
-- Message plus clair quand le code d'invitation de la consultation à distance est refusé.
+- Travail à distance : depuis chez vous ou l'étranger, connectez-vous avec votre identifiant et votre mot de passe, puis consultez et modifiez l'hôtel (réservations, caisse, chambres, employés…). L'ordinateur de l'hôtel applique chaque changement et l'inscrit à l'Historique.
+- Préparer l'hôtel sur un autre ordinateur, puis « Retrouver mon hôtel » sur celui de l'hôtel : tout arrive, rien à recopier.
+- Plus de clé secrète à noter : l'adresse du serveur est déjà remplie, et le lien se fait tout seul à la création de l'hôtel.
+- Nouveau client pendant une réservation : champ Email (facultatif). « Courriel » devient « Email » partout.

@@ -5,6 +5,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { ENVOYEES_A_L_HOTEL } from "./api";
 import { LONGUEUR_CLE } from "./distance";
 import { libelleAction, LIBELLES_PERMISSIONS, TOUTES_PERMISSIONS, GROUPES_PERMISSIONS } from "./permissions";
 
@@ -32,6 +33,16 @@ describe("cohérence Rust ↔ TypeScript", () => {
       .map((m) => m[1]!)
       .sort();
     expect(declarees).toEqual(commandesRust());
+  });
+
+  it("à distance, l'interface envoie à l'hôtel exactement ce que Rust accepte d'y envoyer", () => {
+    const rust = lire("crates/tanana-core/src/distance/commandes.rs");
+    const bloc = rust.slice(rust.indexOf("pub const ENVOYEES_A_L_HOTEL"), rust.indexOf("];", rust.indexOf("pub const ENVOYEES_A_L_HOTEL")));
+    const liste = [...bloc.matchAll(/"(\w+)"/g)].map((m) => m[1]!);
+    // Reçus et factures : Rust les fait faire à l'hôtel lui-même, puis range le PDF ici
+    const attendues = liste.filter((c) => c !== "imprimer_recu" && c !== "imprimer_facture").sort();
+    expect([...ENVOYEES_A_L_HOTEL].sort()).toEqual(attendues);
+    expect(liste).toContain("imprimer_recu");
   });
 
   it("la longueur de la clé secrète vérifiée à l'écran est celle que Rust affiche", () => {

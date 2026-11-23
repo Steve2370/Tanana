@@ -13,8 +13,11 @@
 //! opération est découpée en « préparer » (base), « échanger » (réseau),
 //! « terminer » (base), pour ne jamais bloquer l'écran pendant un envoi lent.
 
+pub mod acces;
 pub mod capture;
 pub mod chiffrement;
+pub mod commandes;
+pub mod principal;
 pub mod relais;
 
 use std::collections::HashSet;
@@ -218,6 +221,60 @@ pub const PERMISSIONS_DISTANTES: [Permission; 7] = [
     Permission::UtilisateurGerer, // pour la liste des employés ; la base refuse toute modification
 ];
 
+/// Nouvelle clé secrète et demande d'inscription au relais.
+pub(crate) fn preparer_demande(code_invitation: Option<&str>) -> Resultat<ActivationPreparee> {
+    let secret = Secret::generer()?;
+    // Le témoin permettra à l'administrateur de vérifier sa clé avant tout téléchargement.
+    let (nonce, chiffre) = secret.chiffrer(TEXTE_TEMOIN, &associe_temoin("inscription"))?;
+    Ok(ActivationPreparee {
+        demande: DemandeInscription {
+            jeton_lecture: secret.jeton_lecture(),
+            jeton_admin: Some(secret.jeton_admin()),
+            temoin: Temoin { nonce, chiffre },
+            code_invitation: code_invitation.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()),
+        },
+        secret,
+    })
+}
+
+/// Enregistre la liaison avec le relais, installe la capture et met tout
+/// l'hôtel dans la boîte d'envoi. `utilisateur_id` absent : action du système.
+pub(crate) fn enregistrer_liaison(
+    tx: &Connection,
+    adresse: &str,
+    preparation: &ActivationPreparee,
+    inscription: &Inscription,
+    horodatage: &str,
+    utilisateur_id: Option<&str>,
+) -> Resultat<()> {
+    if active(tx)? {
+        return Err(Erreur::Validation("la consultation à distance est déjà activée".into()));
+    }
+    let adresse = adresse.trim().trim_end_matches('/');
+    tx.execute(
+        "INSERT INTO sync_config (id, relais, hotel_id, jeton_envoi, secret, active_le) VALUES (1, ?1, ?2, ?3, ?4, ?5)",
+        params![adresse, inscription.hotel_id, inscription.jeton_envoi, preparation.secret.afficher(), horodatage],
+    )?;
+    tx.execute("DELETE FROM sync_boite", [])?;
+    capture::installer(tx)?;
+    audit::ecrire(
+        tx,
+        horodatage,
+        utilisateur_id,
+        "distance.activation",
+        Some("parametres"),
+        None,
+        None,
+        Some(&json!({ "relais": adresse, "hotel_id": inscription.hotel_id })),
+    )?;
+    // Le journal ci-dessus est déjà capturé ; le reste de l'hôtel suit.
+    tx.execute("DELETE FROM sync_boite", [])?;
+    capture::tout_mettre_en_boite(tx)?;
+    // Les coffres préparés avant l'activation seront fermés et déposés
+    tx.execute("UPDATE sync_acces SET a_envoyer = 1", [])?;
+    Ok(())
+}
+
 fn vers_sql(v: &Value) -> Sql {
     match v {
         Value::Null => Sql::Null,
@@ -243,17 +300,7 @@ impl Tanana {
             }
             Ok(())
         })?;
-        let secret = Secret::generer()?;
-        // Le témoin permettra à l'administrateur de vérifier sa clé avant tout téléchargement.
-        let (nonce, chiffre) = secret.chiffrer(TEXTE_TEMOIN, &associe_temoin("inscription"))?;
-        Ok(ActivationPreparee {
-            demande: DemandeInscription {
-                jeton_lecture: secret.jeton_lecture(),
-                temoin: Temoin { nonce, chiffre },
-                code_invitation: code_invitation.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()),
-            },
-            secret,
-        })
+        preparer_demande(code_invitation)
     }
 
     /// 2/2 — Enregistre la liaison, installe la capture et met tout l'hôtel en boîte d'envoi.
@@ -266,28 +313,8 @@ impl Tanana {
     ) -> Resultat<CodesDistance> {
         let adresse = adresse_relais.trim().trim_end_matches('/').to_string();
         self.executer(token, Some(Permission::ParametresGerer), |tx, a| {
-            if active(tx)? {
-                return Err(Erreur::Validation("la consultation à distance est déjà activée".into()));
-            }
-            tx.execute(
-                "INSERT INTO sync_config (id, relais, hotel_id, jeton_envoi, secret, active_le) VALUES (1, ?1, ?2, ?3, ?4, ?5)",
-                params![adresse, inscription.hotel_id, inscription.jeton_envoi, preparation.secret.afficher(), a.horodatage()],
-            )?;
-            tx.execute("DELETE FROM sync_boite", [])?;
-            capture::installer(tx)?;
-            audit::ecrire(
-                tx,
-                &a.horodatage(),
-                Some(&a.utilisateur_id),
-                "distance.activation",
-                Some("parametres"),
-                None,
-                None,
-                Some(&json!({ "relais": adresse, "hotel_id": inscription.hotel_id })),
-            )?;
-            // Le journal ci-dessus est déjà capturé ; le reste de l'hôtel suit.
-            tx.execute("DELETE FROM sync_boite", [])?;
-            capture::tout_mettre_en_boite(tx)?;
+            enregistrer_liaison(tx, &adresse, preparation, inscription, &a.horodatage(), Some(&a.utilisateur_id))?;
+            tx.execute("DELETE FROM sync_activation_auto", [])?;
             Ok(CodesDistance {
                 relais: adresse.clone(),
                 hotel_id: inscription.hotel_id.clone(),
@@ -399,9 +426,13 @@ impl Tanana {
         let maintenant = horodater(self.maintenant());
         let conn = &self.conn;
         let Some((relais, hotel_id, jeton_envoi, secret)) = conn
-            .query_row("SELECT relais, hotel_id, jeton_envoi, secret FROM sync_config WHERE id = 1", [], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
-            })
+            .query_row(
+                "SELECT relais, hotel_id, jeton_envoi, secret FROM sync_config WHERE id = 1 AND remplace_le IS NULL",
+                [],
+                |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+                },
+            )
             .optional()?
         else {
             return Ok(None);
@@ -442,15 +473,36 @@ impl Tanana {
         }))
     }
 
-    /// Le relais a bien reçu le lot : on vide la boîte jusque-là.
-    pub fn envoi_reussi(&mut self, seq_fin: i64) -> Resultat<()> {
+    /// Le relais a bien reçu le lot (numéro `numero`) : on vide la boîte jusque-là.
+    /// `numero` absent : simple signe de vie.
+    pub fn envoi_reussi(&mut self, seq_fin: i64, numero: Option<i64>) -> Resultat<()> {
         let maintenant = horodater(self.maintenant());
         self.conn.execute("DELETE FROM sync_boite WHERE seq <= ?1", [seq_fin])?;
         self.conn.execute(
-            "UPDATE sync_config SET dernier_envoi_le = ?1, derniere_tentative_le = ?1, derniere_erreur = NULL",
-            [&maintenant],
+            "UPDATE sync_config SET dernier_envoi_le = ?1, derniere_tentative_le = ?1, derniere_erreur = NULL,
+                    dernier_numero = max(dernier_numero, coalesce(?2, 0))",
+            params![maintenant, numero],
         )?;
         Ok(())
+    }
+
+    /// L'envoi a échoué. Si un autre ordinateur est devenu l'ordinateur
+    /// principal, on le note : plus rien ne partira d'ici.
+    pub fn envoi_refuse(&mut self, e: &Erreur) -> Resultat<()> {
+        if *e == Erreur::PosteRemplace {
+            let maintenant = horodater(self.maintenant());
+            self.conn.execute("UPDATE sync_config SET remplace_le = coalesce(remplace_le, ?1)", [&maintenant])?;
+        }
+        self.envoi_echoue(&e.to_string())
+    }
+
+    /// Vrai si un autre ordinateur a pris la place de celui-ci.
+    pub fn poste_remplace(&self) -> Resultat<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT remplace_le IS NOT NULL FROM sync_config WHERE id = 1", [], |r| r.get::<_, bool>(0))
+            .optional()?
+            .unwrap_or(false))
     }
 
     /// L'envoi a échoué (pas d'Internet…) : on le note, on réessaiera.
@@ -470,13 +522,13 @@ impl Tanana {
         let liaison = self.liaison_distance()?;
         while let Some(envoi) = self.preparer_envoi()? {
             match relais.envoyer(&envoi.hotel_id, &envoi.jeton_envoi, &envoi.lot) {
-                Ok(_) => {
-                    self.envoi_reussi(envoi.lot.seq_fin)?;
+                Ok(accuse) => {
+                    self.envoi_reussi(envoi.lot.seq_fin, Some(accuse.numero))?;
                     bilan.lots += 1;
                     bilan.changements += envoi.changements as i64;
                 }
                 Err(e) => {
-                    self.envoi_echoue(&e.to_string())?;
+                    self.envoi_refuse(&e)?;
                     return Err(e);
                 }
             }
@@ -486,9 +538,9 @@ impl Tanana {
             && let Some((_, hotel_id, jeton)) = liaison
         {
             match relais.signaler_presence(&hotel_id, &jeton) {
-                Ok(()) => self.envoi_reussi(0)?,
+                Ok(()) => self.envoi_reussi(0, None)?,
                 Err(e) => {
-                    self.envoi_echoue(&e.to_string())?;
+                    self.envoi_refuse(&e)?;
                     return Err(e);
                 }
             }
@@ -496,13 +548,16 @@ impl Tanana {
         Ok(bilan)
     }
 
-    /// (adresse du relais, hotel_id, jeton d'envoi) si la consultation à distance est activée.
+    /// (adresse du relais, hotel_id, jeton d'envoi) si la consultation à distance est
+    /// activée et que cet ordinateur est toujours l'ordinateur principal.
     pub fn liaison_distance(&self) -> Resultat<Option<(String, String, String)>> {
         Ok(self
             .conn
-            .query_row("SELECT relais, hotel_id, jeton_envoi FROM sync_config WHERE id = 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
+            .query_row(
+                "SELECT relais, hotel_id, jeton_envoi FROM sync_config WHERE id = 1 AND remplace_le IS NULL",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .optional()?)
     }
 }
@@ -579,6 +634,7 @@ const SCHEMA_COPIE: &str = "CREATE TABLE IF NOT EXISTS copie_distance (
     hotel_id        TEXT NOT NULL,
     secret          TEXT NOT NULL,
     acces_hash      TEXT,
+    identifiant     TEXT,
     dernier_numero  INTEGER NOT NULL DEFAULT 0,
     donnees_du      TEXT,
     dernier_contact TEXT,
@@ -639,6 +695,15 @@ impl Tanana {
         )?;
         if existe == 0 {
             return Err(Erreur::Validation("ce fichier n'est pas une copie consultée à distance".into()));
+        }
+        // Copie créée par une version d'avant la connexion par identifiant
+        let a_identifiant: i64 = conn.query_row(
+            "SELECT count(*) FROM pragma_table_info('copie_distance') WHERE name = 'identifiant'",
+            [],
+            |r| r.get(0),
+        )?;
+        if a_identifiant == 0 {
+            conn.execute_batch("ALTER TABLE copie_distance ADD COLUMN identifiant TEXT;")?;
         }
         let triggers: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'")?
@@ -747,6 +812,21 @@ impl Tanana {
         self.session_copie.jeton = None;
     }
 
+    /// Identifiant de l'administratrice qui consulte (pour se connecter à l'hôtel).
+    pub fn definir_identifiant_copie(&mut self, identifiant: &str) -> Resultat<()> {
+        self.exiger_copie()?;
+        self.conn.execute_batch("PRAGMA query_only = OFF;")?;
+        let r = self.conn.execute("UPDATE copie_distance SET identifiant = ?1 WHERE id = 1", [identifiant.trim()]);
+        self.conn.execute_batch("PRAGMA query_only = ON;")?;
+        r?;
+        Ok(())
+    }
+
+    pub fn identifiant_copie(&self) -> Resultat<Option<String>> {
+        self.exiger_copie()?;
+        Ok(self.conn.query_row("SELECT identifiant FROM copie_distance WHERE id = 1", [], |r| r.get(0))?)
+    }
+
     /// Vrai si le mot de passe de consultation a déjà été choisi.
     pub fn acces_copie_defini(&self) -> Resultat<bool> {
         self.exiger_copie()?;
@@ -793,7 +873,7 @@ impl Tanana {
                 let l = &recu.lot;
                 let clair = secret.dechiffrer(&l.nonce, &l.chiffre, &associe_lot(&hotel_id, l.seq_debut, l.seq_fin))?;
                 let lot: Lot = serde_json::from_slice(&clair)?;
-                appliquer_changements(&tx, &lot.changements)?;
+                appliquer_changements(&tx, &lot.changements, false)?;
                 dernier = recu.numero;
                 genere_le = Some(lot.genere_le);
                 appliques += 1;
@@ -847,9 +927,19 @@ impl Tanana {
     }
 }
 
-/// Applique des changements sur la copie. Une table ou une colonne inconnue
-/// (hôtel équipé d'une version plus récente de Tanana) est ignorée.
-fn appliquer_changements(conn: &Connection, changements: &[Changement]) -> Resultat<()> {
+/// Valeur mise à la place d'un secret jamais reçu (mot de passe, PIN) quand
+/// la ligne n'existait pas : aucun mot de passe ne peut y correspondre.
+const SECRET_INCONNU: &str = "!distance";
+
+/// Applique des changements sur la copie (ou, avec `preserver_secrets`, sur la
+/// base d'un ordinateur qui reprend l'hôtel : les secrets reçus comme « * »
+/// gardent leur valeur locale). Une table ou une colonne inconnue (hôtel
+/// équipé d'une version plus récente de Tanana) est ignorée.
+pub(crate) fn appliquer_changements(
+    conn: &Connection,
+    changements: &[Changement],
+    preserver_secrets: bool,
+) -> Resultat<()> {
     let mut structure: std::collections::HashMap<String, (Vec<String>, Vec<String>)> = Default::default();
     for c in changements {
         if !capture::TABLES_ENVOYEES.contains(&c.table.as_str()) {
@@ -875,15 +965,26 @@ fn appliquer_changements(conn: &Connection, changements: &[Changement]) -> Resul
             (Operation::Ecrire, Some(d)) => {
                 let mut noms = Vec::new();
                 let mut valeurs = Vec::new();
+                let mut gardes = Vec::new();
                 for col in colonnes {
                     if let Some(v) = d.get(col) {
+                        let secret = capture::COLONNES_SECRETES.contains(&(c.table.as_str(), col.as_str()));
+                        if preserver_secrets && secret && v.as_str() == Some("*") {
+                            noms.push(col.clone());
+                            valeurs.push(Sql::Text(SECRET_INCONNU.into()));
+                            gardes.push(col.clone());
+                            continue;
+                        }
                         noms.push(col.clone());
                         valeurs.push(vers_sql(v));
                     }
                 }
                 let places = vec!["?"; noms.len()].join(", ");
-                let maj: Vec<String> =
-                    noms.iter().filter(|n| !cles.contains(n)).map(|n| format!("{n} = excluded.{n}")).collect();
+                let maj: Vec<String> = noms
+                    .iter()
+                    .filter(|n| !cles.contains(n) && !gardes.contains(n))
+                    .map(|n| format!("{n} = excluded.{n}"))
+                    .collect();
                 let sur_conflit =
                     if maj.is_empty() { "DO NOTHING".to_string() } else { format!("DO UPDATE SET {}", maj.join(", ")) };
                 conn.execute(

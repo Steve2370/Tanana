@@ -4,6 +4,7 @@ import { Search, UserPlus, UserRound } from "lucide-react";
 import type { Client } from "../../bindings/Client";
 import { Alerte, Bouton, Champ, entreePourValider, useAction } from "../../components/ui";
 import { api } from "../../lib/api";
+import { emailPlausible } from "../../lib/format";
 import { useSession } from "../../lib/session";
 
 export function nomComplet(c: Client): string {
@@ -41,6 +42,7 @@ export function ChoixClient({ client, onChange }: { client: Client | null; onCha
           <span>
             <span className="block text-lg font-bold">{nomComplet(client)}</span>
             {client.telephone && <span className="block text-gris">Téléphone : {client.telephone}</span>}
+            {client.email && <span className="block text-gris">Email : {client.email}</span>}
           </span>
         </span>
         <Bouton variante="secondaire" onClick={() => onChange(null)}>
@@ -121,15 +123,18 @@ function NouveauClient({
   const [nom, setNom] = useState(estNumero ? "" : nomPropose);
   const [prenom, setPrenom] = useState("");
   const [telephone, setTelephone] = useState(estNumero ? nomPropose : "");
+  const [email, setEmail] = useState("");
   const { lancer, enCours, erreur, setErreur } = useAction(api.creerClient);
 
   const enregistrer = async () => {
     if (!nom.trim()) return setErreur("Écrivez le nom du client.");
+    const mail = email.trim();
+    if (mail && !emailPlausible(mail)) return setErreur("L'email n'est pas valide. Écrivez-le comme ceci : nom@exemple.com");
     const c = await lancer({
       nom,
       prenom: prenom || null,
       telephone: telephone || null,
-      email: null,
+      email: mail || null,
       piece_identite: null,
       notes: null,
     });
@@ -143,7 +148,18 @@ function NouveauClient({
         <Champ libelle="Nom" value={nom} onChange={(e) => setNom(e.target.value)} autoFocus />
         <Champ libelle="Prénom" value={prenom} onChange={(e) => setPrenom(e.target.value)} aide="Facultatif" />
       </div>
-      <Champ libelle="Téléphone" value={telephone} onChange={(e) => setTelephone(e.target.value)} inputMode="tel" aide="Facultatif, mais utile pour le retrouver." />
+      <div className="grid grid-cols-2 gap-4">
+        <Champ libelle="Téléphone" value={telephone} onChange={(e) => setTelephone(e.target.value)} inputMode="tel" aide="Facultatif, mais utile pour le retrouver." />
+        <Champ
+          libelle="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoCapitalize="off"
+          spellCheck={false}
+          aide="Facultatif."
+        />
+      </div>
       {erreur && <Alerte type="erreur">{erreur}</Alerte>}
       <div className="flex justify-end gap-3">
         <Bouton variante="secondaire" onClick={onAnnuler}>

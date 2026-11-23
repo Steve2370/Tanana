@@ -61,7 +61,13 @@ export const MENU: EntreeMenu[] = [
   { id: "parametres", libelle: "Réglages", icone: Settings, permissions: ["parametres.gerer", "sauvegarde.faire"], section: "Administration" },
 ];
 
-export function Coquille({ nomHotel }: { nomHotel: string }) {
+/** Poste à distance : les modifications partent-elles vers l'hôtel ? */
+export interface Distant {
+  modifications: boolean;
+  onLien: (modifications: boolean) => void;
+}
+
+export function Coquille({ nomHotel, distant }: { nomHotel: string; distant?: Distant }) {
   const { session, peut, fermer } = useSession();
   const [page, setPage] = useState<IdPage>("accueil");
   const lectureSeule = useLectureSeule();
@@ -160,9 +166,9 @@ export function Coquille({ nomHotel }: { nomHotel: string }) {
               <BandeauMiseAJour />
             </div>
           )}
-          {lectureSeule && (
+          {distant && (
             <div className="mx-auto max-w-6xl">
-              <BandeauConsultation onActualiser={actualiser} />
+              <BandeauConsultation onActualiser={actualiser} modifications={distant.modifications} onLien={distant.onLien} />
             </div>
           )}
           <div key={`${courante}-${donnees}`} className="apparition mx-auto max-w-6xl">

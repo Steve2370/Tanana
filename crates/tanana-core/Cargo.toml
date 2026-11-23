@@ -24,7 +24,7 @@ hkdf = "0.12"
 flate2 = "1"
 data-encoding = "2"
 ureq = { version = "3", features = ["json"] }
-tanana-protocole = { version = "0.1.0", path = "../tanana-protocole" }
+tanana-protocole = { path = "../tanana-protocole" }
 
 [dev-dependencies]
 tempfile = "3"

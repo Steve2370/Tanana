@@ -32,7 +32,15 @@ pub const TABLES_ENVOYEES: [&str; 18] = [
 ];
 
 /// Tables qui ne quittent jamais l'hôtel.
-pub const TABLES_LOCALES: [&str; 3] = ["sessions", "sync_boite", "sync_config"];
+pub const TABLES_LOCALES: [&str; 7] = [
+    "sessions",
+    "sync_boite",
+    "sync_config",
+    "sync_acces",
+    "sync_acces_retraits",
+    "sync_commandes_vues",
+    "sync_activation_auto",
+];
 
 /// Colonnes secrètes : leur valeur n'est jamais envoyée, seulement « * » si
 /// elle existe (l'administrateur voit qu'un employé a un PIN, pas le PIN).

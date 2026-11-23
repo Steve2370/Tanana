@@ -1,18 +1,40 @@
-//! Consultation à distance, côté application.
+//! Travail à distance, côté application.
 //!
-//! Règle d'or : **jamais d'appel réseau pendant que la base est verrouillée**.
-//! Chaque échange se fait en trois temps (préparer sous verrou, échanger
-//! sans verrou, terminer sous verrou) : un envoi lent sur une connexion
-//! mobile ne fige jamais l'écran de la réception.
+//! **Ordinateur principal** (celui de l'hôtel) : toutes les 15 secondes, il
+//! envoie ses changements, dépose les coffres d'accès et, de temps en temps,
+//! une copie complète. Un autre fil attend les modifications demandées à
+//! distance, les exécute et répond.
+//!
+//! **Poste à distance** (le portable de l'administratrice) : sa copie se met
+//! à jour toutes les 15 secondes ; ses modifications partent vers l'hôtel.
+//!
+//! Règle d'or : **jamais d'appel réseau pendant que la base est verrouillée**
+//! (sauf « Retrouver mon hôtel », quand personne ne travaille encore ici).
+//! Un envoi lent sur une connexion mobile ne fige jamais l'écran de la réception.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use serde_json::{Map, Value};
 use tanana_core::distance::BilanEnvoi;
 use tanana_core::distance::relais::{Relais, RelaisHttp};
+use tanana_core::modeles::SessionOuverte;
 use tanana_core::{Erreur, Resultat};
 use tauri::{AppHandle, Manager};
 
 use crate::etat::Etat;
+
+/// Rythme des envois et des mises à jour de la copie.
+pub const INTERVALLE: Duration = Duration::from_secs(15);
+/// Attente maximale d'une modification par l'ordinateur principal (secondes).
+const ATTENTE_COMMANDES: u64 = 25;
+/// Toutes les combien on garde la session ouverte sur l'hôtel (poste à distance).
+const ENTRETIEN_SESSION: Duration = Duration::from_secs(4 * 60);
+
+/// Note un refus du relais (« poste remplacé ») ou un échec, puis le renvoie.
+fn echec(etat: &Etat, e: Erreur) -> Erreur {
+    let _ = etat.avec(|t| t.envoi_refuse(&e));
+    e
+}
 
 /// Envoie tout ce qui attend (ou signale la présence de l'hôtel s'il n'y a rien).
 /// Sans effet si la consultation à distance n'est pas activée.
@@ -22,32 +44,89 @@ pub fn envoyer_tout(etat: &Etat) -> Resultat<BilanEnvoi> {
         let resultat =
             RelaisHttp::new(&envoi.relais).and_then(|r| r.envoyer(&envoi.hotel_id, &envoi.jeton_envoi, &envoi.lot));
         match resultat {
-            Ok(_) => {
-                etat.avec(|t| t.envoi_reussi(envoi.lot.seq_fin))?;
+            Ok(accuse) => {
+                etat.avec(|t| t.envoi_reussi(envoi.lot.seq_fin, Some(accuse.numero)))?;
                 bilan.lots += 1;
                 bilan.changements += envoi.changements as i64;
             }
-            Err(e) => {
-                let _ = etat.avec(|t| t.envoi_echoue(&e.to_string()));
-                return Err(e);
-            }
+            Err(e) => return Err(echec(etat, e)),
         }
     }
     if bilan.lots == 0
         && let Some((adresse, hotel_id, jeton)) = etat.avec(|t| t.liaison_distance())?
     {
         match RelaisHttp::new(&adresse).and_then(|r| r.signaler_presence(&hotel_id, &jeton)) {
-            Ok(()) => etat.avec(|t| t.envoi_reussi(0))?,
-            Err(e) => {
-                let _ = etat.avec(|t| t.envoi_echoue(&e.to_string()));
-                return Err(e);
-            }
+            Ok(()) => etat.avec(|t| t.envoi_reussi(0, None))?,
+            Err(e) => return Err(echec(etat, e)),
         }
     }
     Ok(bilan)
 }
 
-/// Télécharge et applique les nouveautés de l'hôtel consulté. Renvoie le nombre de lots appliqués.
+/// Dépose (ou retire) les coffres d'accès des administrateurs.
+pub fn deposer_acces(etat: &Etat) -> Resultat<()> {
+    let Some(e) = etat.avec(|t| t.preparer_acces())? else { return Ok(()) };
+    let relais = RelaisHttp::new(&e.relais)?;
+    for (uid, recherche, coffre) in &e.depots {
+        relais.deposer_acces(&e.hotel_id, &e.jeton_envoi, recherche, coffre).map_err(|x| echec(etat, x))?;
+        etat.avec(|t| t.acces_depose(uid, coffre))?;
+    }
+    for recherche in &e.retraits {
+        relais.retirer_acces(&e.hotel_id, &e.jeton_envoi, recherche).map_err(|x| echec(etat, x))?;
+        etat.avec(|t| t.acces_retire(recherche))?;
+    }
+    Ok(())
+}
+
+/// Dépose une copie complète si c'est le moment.
+pub fn deposer_instantane(etat: &Etat) -> Resultat<bool> {
+    let dossier = etat.dossier_travail();
+    let Some(e) = etat.avec(|t| t.preparer_instantane(&dossier))? else { return Ok(false) };
+    RelaisHttp::new(&e.relais)?
+        .deposer_instantane(&e.hotel_id, &e.jeton_envoi, &e.instantane)
+        .map_err(|x| echec(etat, x))?;
+    etat.avec(|t| t.instantane_depose(e.instantane.apres_numero))?;
+    Ok(true)
+}
+
+/// Relie l'hôtel au relais si c'était demandé à sa création (et qu'Internet est là).
+pub fn activation_auto(etat: &Etat) -> Resultat<bool> {
+    let Some((adresse, prep)) = etat.avec(|t| t.preparer_activation_auto())? else { return Ok(false) };
+    let inscription = RelaisHttp::new(&adresse)?.inscrire(&prep.demande)?;
+    etat.avec(|t| t.terminer_activation_auto(&adresse, &prep, &inscription))?;
+    log::info!("travail à distance : hôtel relié au serveur {adresse}");
+    Ok(true)
+}
+
+/// Ordinateur principal : attend les modifications demandées à distance
+/// (jusqu'à 25 s), les exécute, envoie les changements, puis répond.
+pub fn traiter_commandes(etat: &Etat) -> Resultat<usize> {
+    let Some((adresse, hotel_id, jeton)) =
+        etat.avec(|t| if t.est_une_copie() { Ok(None) } else { t.liaison_distance() })?
+    else {
+        return Ok(0);
+    };
+    let relais = RelaisHttp::new(&adresse)?;
+    let attente = relais.lire_commandes(&hotel_id, &jeton, ATTENTE_COMMANDES).map_err(|e| echec(etat, e))?;
+    let mut faites = 0;
+    for c in attente.commandes {
+        match etat.avec(|t| t.traiter_commande_distante(&c)) {
+            Ok(reponse) => {
+                // La copie de l'administratrice doit voir le changement dès la réponse
+                if let Err(e) = envoyer_tout(etat) {
+                    log::warn!("modification à distance : envoi des changements impossible ({e})");
+                }
+                relais.repondre(&hotel_id, &jeton, &c.id, &reponse).map_err(|e| echec(etat, e))?;
+                faites += 1;
+            }
+            Err(e) => log::warn!("demande à distance ignorée : {e}"),
+        }
+    }
+    Ok(faites)
+}
+
+/// Poste à distance : télécharge et applique les nouveautés de l'hôtel.
+/// Renvoie le nombre de lots appliqués.
 pub fn mettre_a_jour_copie(etat: &Etat) -> Resultat<usize> {
     let mut total = 0;
     loop {
@@ -60,46 +139,180 @@ pub fn mettre_a_jour_copie(etat: &Etat) -> Resultat<usize> {
     }
 }
 
-/// Envois automatiques à l'hôtel : une minute après le démarrage, puis toutes les minutes.
-/// Les échecs (pas d'Internet) sont notés dans l'état, et journalisés une fois par changement.
+/// Poste à distance : envoie une demande à l'hôtel et attend sa réponse.
+/// Ensuite, la copie est mise à jour (l'hôtel a envoyé ses changements avant de répondre).
+pub fn envoyer_commande(etat: &Etat, commande: &str, args: Map<String, Value>) -> Resultat<Value> {
+    let (hotel_id, jeton_admin, c) = etat.avec(|t| t.preparer_commande_distante(commande, args))?;
+    let adresse = etat.avec(|t| t.preparer_lecture_copie().map(|p| p.relais))?;
+    let reponse = RelaisHttp::new(&adresse)?.poster_commande(&hotel_id, &jeton_admin, &c)?;
+    let v = etat.avec(|t| t.lire_reponse_distante(&c.id, &reponse))?;
+    if let Err(e) = mettre_a_jour_copie(etat) {
+        log::warn!("mise à jour de la copie après une modification : {e}");
+    }
+    Ok(v)
+}
+
+/// Poste à distance : ouvre une session sur l'ordinateur de l'hôtel.
+pub fn connecter_a_l_hotel(etat: &Etat, identifiant: &str, mot_de_passe: &str) -> Resultat<SessionOuverte> {
+    let mut args = Map::new();
+    args.insert("identifiant".into(), Value::String(identifiant.into()));
+    args.insert("mot_de_passe".into(), Value::String(mot_de_passe.into()));
+    let s: SessionOuverte = serde_json::from_value(envoyer_commande(etat, "connexion", args)?)?;
+    if let Ok(mut d) = etat.distant.lock() {
+        d.session_hotel = Some(s.clone());
+    }
+    Ok(s)
+}
+
+/// Rouvre la session sur l'hôtel avec l'identifiant et le mot de passe gardés en mémoire.
+pub fn reconnecter(etat: &Etat) -> Resultat<SessionOuverte> {
+    let (identifiant, mdp) = {
+        let d = etat.distant.lock().map_err(|_| Erreur::Base("verrou".into()))?;
+        match (&d.identifiant, &d.mot_de_passe) {
+            (Some(i), Some(m)) => (i.clone(), m.clone()),
+            _ => return Err(Erreur::NonAuthentifie),
+        }
+    };
+    connecter_a_l_hotel(etat, &identifiant, &mdp)
+}
+
+/// Session ouverte sur l'hôtel (jeton), en la rouvrant si besoin.
+pub fn jeton_hotel(etat: &Etat) -> Resultat<String> {
+    let existant = etat.distant.lock().ok().and_then(|d| d.session_hotel.as_ref().map(|s| s.token.clone()));
+    match existant {
+        Some(j) => Ok(j),
+        None => reconnecter(etat).map(|s| s.token),
+    }
+}
+
+/// Une modification à distance, avec la session de l'hôtel. Si l'hôtel a
+/// fermé la session (inactivité, redémarrage), on la rouvre une fois.
+pub fn modifier_a_distance(etat: &Etat, commande: &str, args: Map<String, Value>) -> Resultat<Value> {
+    let avec_jeton = |jeton: String| {
+        let mut a = args.clone();
+        a.insert("token".into(), Value::String(jeton));
+        a
+    };
+    match envoyer_commande(etat, commande, avec_jeton(jeton_hotel(etat)?)) {
+        Err(Erreur::NonAuthentifie | Erreur::SessionExpiree) => {
+            let s = reconnecter(etat)?;
+            envoyer_commande(etat, commande, avec_jeton(s.token))
+        }
+        r => r,
+    }
+}
+
+/// Une étape du poste à distance : copie à jour, session sur l'hôtel entretenue.
+fn entretenir_poste(etat: &Etat, dernier_entretien: &mut Option<Instant>) {
+    if let Err(e) = mettre_a_jour_copie(etat) {
+        log::debug!("mise à jour de la copie : {e}");
+    }
+    let (session, identifiants) = match etat.distant.lock() {
+        Ok(d) => (d.session_hotel.clone(), d.mot_de_passe.is_some()),
+        Err(_) => return,
+    };
+    match session {
+        // Pas encore de session (hôtel injoignable à la connexion) : on réessaie
+        None if identifiants => {
+            if dernier_entretien.is_none_or(|t| t.elapsed() >= Duration::from_secs(60)) {
+                *dernier_entretien = Some(Instant::now());
+                if reconnecter(etat).is_ok() {
+                    log::info!("travail à distance : l'hôtel est joignable, les modifications sont possibles");
+                }
+            }
+        }
+        Some(s) if dernier_entretien.is_none_or(|t| t.elapsed() >= ENTRETIEN_SESSION) => {
+            *dernier_entretien = Some(Instant::now());
+            let mut args = Map::new();
+            args.insert("token".into(), Value::String(s.token));
+            match envoyer_commande(etat, "ma_session", args) {
+                Err(Erreur::NonAuthentifie | Erreur::SessionExpiree) => {
+                    if let Ok(mut d) = etat.distant.lock() {
+                        d.session_hotel = None;
+                    }
+                    let _ = reconnecter(etat);
+                }
+                Err(e) => log::debug!("entretien de la session sur l'hôtel : {e}"),
+                Ok(_) => {}
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Une étape de l'ordinateur principal : activation, envois, coffres, copie complète.
+fn envoyer_etape(etat: &Etat) -> Resultat<BilanEnvoi> {
+    activation_auto(etat)?;
+    let bilan = envoyer_tout(etat)?;
+    deposer_acces(etat)?;
+    if deposer_instantane(etat)? {
+        log::info!("travail à distance : copie complète de l'hôtel déposée");
+    }
+    Ok(bilan)
+}
+
+/// Fils de travail à distance : envois (ou mise à jour de la copie) toutes les
+/// 15 secondes, et écoute des modifications demandées à distance.
 pub fn lancer_envois_automatiques(app: AppHandle) {
+    let a = app.clone();
     std::thread::Builder::new()
         .name("tanana-envois".into())
         .spawn(move || {
-            std::thread::sleep(Duration::from_secs(20));
+            std::thread::sleep(Duration::from_secs(5));
             let mut dernier_echec: Option<String> = None;
+            let mut entretien: Option<Instant> = None;
             loop {
-                let etat = app.state::<Etat>();
-                let copie = etat.avec(|t| Ok(t.est_une_copie())).unwrap_or(true);
-                if !copie {
-                    match envoyer_tout(&etat) {
+                let etat = a.state::<Etat>();
+                match etat.avec(|t| Ok(t.est_une_copie())) {
+                    Ok(true) => entretenir_poste(&etat, &mut entretien),
+                    Ok(false) => match envoyer_etape(&etat) {
                         Ok(b) => {
                             if b.lots > 0 {
                                 log::info!(
-                                    "consultation à distance : {} lot(s), {} changement(s) envoyés",
+                                    "travail à distance : {} lot(s), {} changement(s) envoyés",
                                     b.lots,
                                     b.changements
                                 );
                             }
                             if dernier_echec.take().is_some() {
-                                log::info!("consultation à distance : connexion rétablie");
+                                log::info!("travail à distance : connexion rétablie");
                             }
                         }
-                        // Base pas prête (clé manquante…) : rien à faire
                         Err(Erreur::NonInitialise) => {}
                         Err(e) => {
                             let message = e.to_string();
                             if dernier_echec.as_deref() != Some(message.as_str()) {
-                                log::warn!("consultation à distance : envoi impossible ({message})");
+                                log::warn!("travail à distance : envoi impossible ({message})");
                                 dernier_echec = Some(message);
                             }
                         }
-                    }
+                    },
+                    Err(_) => {}
                 }
-                std::thread::sleep(Duration::from_secs(60));
+                std::thread::sleep(INTERVALLE);
             }
         })
         .expect("fil des envois");
+
+    std::thread::Builder::new()
+        .name("tanana-ecoute".into())
+        .spawn(move || {
+            std::thread::sleep(Duration::from_secs(8));
+            loop {
+                let etat = app.state::<Etat>();
+                let debut = Instant::now();
+                match traiter_commandes(&etat) {
+                    Ok(n) if n > 0 => log::info!("travail à distance : {n} modification(s) faite(s) à distance"),
+                    Ok(_) => {}
+                    Err(e) => log::debug!("écoute des modifications à distance : {e}"),
+                }
+                // Rien à écouter, ou erreur rapide : on ne tourne pas à vide
+                if debut.elapsed() < Duration::from_secs(2) {
+                    std::thread::sleep(INTERVALLE);
+                }
+            }
+        })
+        .expect("fil d'écoute");
 }
 
 #[cfg(test)]

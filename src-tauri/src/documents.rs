@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use tanana_core::distance::commandes::DocumentTransmis;
 use tanana_core::modeles::{DocumentEmis, TypeDocument};
 use tanana_core::services::documents::DocumentImprime;
 use tanana_core::{Erreur, Resultat};
@@ -36,11 +37,34 @@ pub fn sous_dossier(t: TypeDocument) -> &'static str {
 
 /// Nom de fichier lisible et valable sur Windows comme sur Mac :
 /// « R-2026-0001 Mbarga Aline.pdf », « … (duplicata).pdf ».
+#[cfg(test)]
 pub fn nom_fichier(d: &DocumentImprime) -> String {
-    let client: String =
-        d.contenu
-            .client
-            .nom
+    d.nom_fichier()
+}
+
+/// Un reçu ou une facture à ranger, fait ici ou à l'hôtel (travail à distance).
+pub struct PdfARanger {
+    pub document: DocumentEmis,
+    pub duplicata: bool,
+    pub nom_fichier: String,
+    pub pdf: Vec<u8>,
+}
+
+impl From<DocumentImprime> for PdfARanger {
+    fn from(d: DocumentImprime) -> Self {
+        Self { nom_fichier: d.nom_fichier(), document: d.document, duplicata: d.duplicata, pdf: d.pdf }
+    }
+}
+
+impl TryFrom<DocumentTransmis> for PdfARanger {
+    type Error = Erreur;
+    fn try_from(d: DocumentTransmis) -> Resultat<Self> {
+        let pdf = data_encoding::BASE64
+            .decode(d.pdf.as_bytes())
+            .map_err(|_| Erreur::Base("document reçu de l'hôtel illisible".into()))?;
+        // Le nom vient de l'hôtel : on ne garde qu'un nom de fichier simple
+        let nom: String = d
+            .nom_fichier
             .chars()
             .map(|c| {
                 if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
@@ -49,22 +73,21 @@ pub fn nom_fichier(d: &DocumentImprime) -> String {
                     c
                 }
             })
-            .collect::<String>()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-    let client: String = client.chars().take(60).collect();
-    let suffixe = if d.duplicata { " (duplicata)" } else { "" };
-    format!("{} {}{suffixe}.pdf", d.document.numero, client.trim_end_matches('.'))
+            .collect();
+        let nom = nom.split_whitespace().collect::<Vec<_>>().join(" ");
+        let nom = nom.trim_start_matches(['.', ' ']).to_string();
+        let nom = if nom.to_lowercase().ends_with(".pdf") { nom } else { format!("{nom}.pdf") };
+        Ok(Self { document: d.document, duplicata: d.duplicata, nom_fichier: nom, pdf })
+    }
 }
 
 /// Écrit le PDF dans `documents/Tanana/<Reçus|Factures>/` et renvoie son chemin.
 /// L'écriture passe par un fichier temporaire : jamais de PDF à moitié écrit.
-pub fn enregistrer(dossier_documents: &Path, d: &DocumentImprime) -> Resultat<PathBuf> {
+pub fn enregistrer(dossier_documents: &Path, d: &PdfARanger) -> Resultat<PathBuf> {
     let dossier = dossier_documents.join("Tanana").join(sous_dossier(d.document.type_document));
     let erreur = |e: std::io::Error| Erreur::EnregistrementImpossible(format!("{} : {e}", dossier.display()));
     fs::create_dir_all(&dossier).map_err(erreur)?;
-    let chemin = dossier.join(nom_fichier(d));
+    let chemin = dossier.join(&d.nom_fichier);
     let temporaire = chemin.with_extension("pdf.partiel");
     fs::write(&temporaire, &d.pdf).map_err(erreur)?;
     fs::rename(&temporaire, &chemin).map_err(erreur)?;
@@ -73,7 +96,7 @@ pub fn enregistrer(dossier_documents: &Path, d: &DocumentImprime) -> Resultat<Pa
 
 /// `racine` : comment s'appelle, pour la personne, le dossier où « Tanana » a été créé
 /// (« Documents » d'habitude, « votre dossier personnel » s'il n'y a pas de Documents).
-pub fn resultat(d: DocumentImprime, racine: &str, chemin: PathBuf, ouvert: bool) -> DocumentEnregistre {
+pub fn resultat(d: PdfARanger, racine: &str, chemin: PathBuf, ouvert: bool) -> DocumentEnregistre {
     DocumentEnregistre {
         emplacement: format!("{racine} › Tanana › {}", sous_dossier(d.document.type_document)),
         document: d.document,
@@ -89,7 +112,7 @@ mod tests {
     use tanana_core::Tanana;
     use tanana_core::modeles::*;
 
-    fn document() -> DocumentImprime {
+    fn imprime() -> DocumentImprime {
         let mut t = Tanana::en_memoire().unwrap();
         t.initialiser(ConfigurationInitiale {
             nom_hotel: "Hôtel".into(),
@@ -142,9 +165,13 @@ mod tests {
         t.imprimer_facture(&tok, &r.id, 60).unwrap()
     }
 
+    fn document() -> PdfARanger {
+        imprime().into()
+    }
+
     #[test]
     fn nom_de_fichier_sans_caracteres_interdits() {
-        let mut d = document();
+        let mut d = imprime();
         let nom = nom_fichier(&d);
         assert!(nom.ends_with(" Mbarga Ngono A Aline.pdf"), "{nom}");
         assert!(nom.starts_with("F-"), "{nom}");
@@ -165,6 +192,22 @@ mod tests {
         enregistrer(dossier.path(), &d).unwrap();
         let r = resultat(d, "Documents", chemin, false);
         assert_eq!(r.emplacement, "Documents › Tanana › Factures");
+    }
+
+    #[test]
+    fn un_document_venu_de_l_hotel_ne_choisit_pas_son_dossier() {
+        let d = imprime();
+        let transmis = DocumentTransmis {
+            document: d.document.clone(),
+            duplicata: false,
+            nom_fichier: "../../Bureau/piege".into(),
+            pdf: data_encoding::BASE64.encode(&d.pdf),
+        };
+        let a_ranger = PdfARanger::try_from(transmis).unwrap();
+        assert_eq!(a_ranger.nom_fichier, "Bureau piege.pdf");
+        let dossier = tempfile::tempdir().unwrap();
+        let chemin = enregistrer(dossier.path(), &a_ranger).unwrap();
+        assert_eq!(chemin.parent().unwrap(), dossier.path().join("Tanana").join("Factures"));
     }
 
     #[test]
