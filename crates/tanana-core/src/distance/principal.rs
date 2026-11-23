@@ -33,6 +33,9 @@ pub const INTERVALLE_INSTANTANE_HEURES: i64 = 3;
 
 const ENTETE_INSTANTANE: &str = "TANANA-INSTANTANE-1";
 
+/// (relais, hôtel, jeton d'envoi, clé secrète, dernier numéro, numéro et date du dernier instantané)
+type LigneInstantane = (String, String, String, String, i64, Option<i64>, Option<String>);
+
 /// Un instantané prêt à partir.
 #[derive(Debug, Clone)]
 pub struct EnvoiInstantane {
@@ -63,7 +66,7 @@ impl Tanana {
     /// `dossier` : où écrire la copie le temps de la chiffrer.
     pub fn preparer_instantane(&mut self, dossier: &Path) -> Resultat<Option<EnvoiInstantane>> {
         let maintenant = self.maintenant();
-        let ligne: Option<(String, String, String, String, i64, Option<i64>, Option<String>)> = self
+        let ligne: Option<LigneInstantane> = self
             .conn_brute()
             .query_row(
                 "SELECT relais, hotel_id, jeton_envoi, secret, dernier_numero, instantane_numero, instantane_le

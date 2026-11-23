@@ -85,6 +85,9 @@ pub(crate) fn noter_acces(conn: &Connection, utilisateur_id: &str, mot_de_passe:
     Ok(())
 }
 
+/// (utilisateur, recherche, empreinte du mot de passe au dépôt, empreinte actuelle, statut)
+type LigneAcces = (String, String, String, Option<String>, Option<String>);
+
 /// Coffres à déposer ou à retirer du relais.
 #[derive(Debug, Clone)]
 pub struct EnvoiAcces {
@@ -114,7 +117,7 @@ impl Tanana {
         if remplace.is_some() {
             return Ok(None);
         }
-        let lignes: Vec<(String, String, String, Option<String>, Option<String>)> = tx
+        let lignes: Vec<LigneAcces> = tx
             .prepare(
                 "SELECT a.utilisateur_id, a.recherche, a.mdp_hash, u.mot_de_passe_hash, u.statut
                  FROM sync_acces a LEFT JOIN utilisateurs u ON u.id = a.utilisateur_id",
