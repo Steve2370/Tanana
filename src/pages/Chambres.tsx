@@ -50,48 +50,52 @@ export function Chambres() {
     <>
       <EnTete titre="Chambres" sousTitre={`${chambres.length} chambre${chambres.length > 1 ? "s" : ""}. Pour chaque chambre : son type, son prix par nuit et si elle peut être louée.`} />
       {erreur && <div className="mb-4"><Alerte type="erreur">{erreur}</Alerte></div>}
-      {/* Deux colonnes seulement si la place suffit ; sinon les formulaires passent dessous. */}
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      {/* Deux colonnes seulement si la place suffit (le tableau a besoin d'environ 45 rem) ;
+          sinon les formulaires passent dessous. */}
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Carte titre="Chambres">
           {chambres.length === 0 ? (
             <p className="text-lg text-gris">Aucune chambre pour le moment. Commencez par créer un type de chambre (« Nouveau type de chambre »), puis ajoutez vos chambres.</p>
           ) : (
-            <table className="w-full text-lg">
-              <thead className="text-left text-base text-gris">
-                <tr className="border-b border-trait">
-                  <th className="py-2 pr-4 font-semibold">Numéro</th>
-                  <th className="py-2 pr-4 font-semibold">Type</th>
-                  <th className="py-2 pr-4 font-semibold">Prix par nuit</th>
-                  <th className="py-2 font-semibold">État</th>
-                </tr>
-              </thead>
-              <tbody>
-                {chambres.map((c) => (
-                  <tr key={c.id} className="border-b border-trait/60">
-                    <td className="py-3 pr-4 font-medium">{c.numero}</td>
-                    <td className="py-3 pr-4">{c.type_nom}</td>
-                    <td className="py-3 pr-4 whitespace-nowrap">{formatMontant(c.prix_nuit_defaut, devise)}</td>
-                    <td className="py-3">
-                      <SiPermis permission="chambre.gerer">
-                        <select
-                          aria-label={`Statut de la chambre ${c.numero}`}
-                          value={c.statut}
-                          onChange={(e) => void changerStatut(c, e.target.value as StatutChambre)}
-                          className="min-h-11 rounded-lg border-2 border-bordure-champ/60 bg-white px-2 text-base"
-                        >
-                          {STATUTS.map((s) => (
-                            <option key={s.valeur} value={s.valeur}>
-                              {s.libelle}
-                            </option>
-                          ))}
-                        </select>
-                      </SiPermis>
-                      <LectureSeule statut={c.statut} />
-                    </td>
+            // Jamais de débordement sur la colonne voisine : au pire, le tableau défile dans sa carte.
+            <div className="-mx-1 overflow-x-auto px-1">
+              <table className="w-full text-lg">
+                <thead className="text-left text-base text-gris">
+                  <tr className="border-b border-trait">
+                    <th className="py-2 pr-4 font-semibold">Numéro</th>
+                    <th className="py-2 pr-4 font-semibold">Type</th>
+                    <th className="py-2 pr-4 font-semibold">Prix par nuit</th>
+                    <th className="py-2 font-semibold">État</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {chambres.map((c) => (
+                    <tr key={c.id} className="border-b border-trait/60">
+                      <td className="py-3 pr-4 font-medium">{c.numero}</td>
+                      <td className="py-3 pr-4">{c.type_nom}</td>
+                      <td className="py-3 pr-4 whitespace-nowrap">{formatMontant(c.prix_nuit_defaut, devise)}</td>
+                      <td className="py-3">
+                        <SiPermis permission="chambre.gerer">
+                          <select
+                            aria-label={`Statut de la chambre ${c.numero}`}
+                            value={c.statut}
+                            onChange={(e) => void changerStatut(c, e.target.value as StatutChambre)}
+                            className="min-h-11 rounded-lg border-2 border-bordure-champ/60 bg-white px-2 text-base"
+                          >
+                            {STATUTS.map((s) => (
+                              <option key={s.valeur} value={s.valeur}>
+                                {s.libelle}
+                              </option>
+                            ))}
+                          </select>
+                        </SiPermis>
+                        <LectureSeule statut={c.statut} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Carte>
         <SiPermis permission="chambre.gerer">
