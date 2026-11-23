@@ -649,7 +649,7 @@ fn corps_facture(m: &mut Mise, c: &ContenuDocument) {
             }
         }
         let prix_nuit =
-            if s.nuits > 0 && s.prix_total % s.nuits == 0 { fmt(s.prix_total / s.nuits) } else { "—".into() };
+            if s.nuits > 0 && s.prix_total % s.nuits == 0 { fmt(s.prix_total / s.nuits) } else { "-".into() };
         m.texte(
             colonnes[0],
             m.y + 20.0,
@@ -891,7 +891,7 @@ pub fn rendre_avec_logo(c: &ContenuDocument, duplicata: bool, logo: Option<&[u8]
     };
 
     let mut doc = Document::new();
-    let titre_pdf = format!("{} {} — {}", majuscule(&titre(c).to_lowercase()), c.numero, c.hotel.nom);
+    let titre_pdf = format!("{} {} - {}", majuscule(&titre(c).to_lowercase()), c.numero, c.hotel.nom);
     doc.set_metadata(
         Metadata::new()
             .title(titre_pdf)

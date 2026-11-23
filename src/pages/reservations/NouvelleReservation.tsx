@@ -311,7 +311,7 @@ export function NouvelleReservation({
 
         {premiere && client && (
           <Alerte type="info" titre="Vérifiez avant d'enregistrer">
-            {nomComplet(client)} — {groupe ? `chambres ${listeNumeros(chambres)}` : `chambre ${premiere.numero}`} —{" "}
+            {nomComplet(client)} - {groupe ? `chambres ${listeNumeros(chambres)}` : `chambre ${premiere.numero}`} -{" "}
             {formatSejour(arrivee, depart)} ({pluriel(nuits, "nuit")}).
           </Alerte>
         )}

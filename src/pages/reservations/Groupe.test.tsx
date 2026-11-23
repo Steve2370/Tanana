@@ -112,7 +112,7 @@ describe("Nouvelle réservation : plusieurs chambres pour un client", () => {
     expect(prix).toHaveTextContent(/Chambre 101 : 2 nuits × 25\s000\sFCFA50\s000\sFCFA/);
     expect(prix).toHaveTextContent(/Chambre 201 : 2 nuits × 60\s000\sFCFA120\s000\sFCFA/);
     expect(screen.getByText("Total des 2 chambres").parentElement).toHaveTextContent(/170\s000\sFCFA/);
-    expect(screen.getByText(/Mbarga Aline — chambres 101 et 201 —/)).toHaveTextContent(`du ${formatJourMoyen(J)} au ${formatJourLong(j(2))} (2 nuits)`);
+    expect(screen.getByText(/Mbarga Aline - chambres 101 et 201 -/)).toHaveTextContent(`du ${formatJourMoyen(J)} au ${formatJourLong(j(2))} (2 nuits)`);
 
     await userEvent.type(screen.getByLabelText("Nom du groupe (facultatif)"), " Équipe SOGEA ");
     await userEvent.click(screen.getByRole("button", { name: "Enregistrer les 2 chambres" }));

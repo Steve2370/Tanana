@@ -303,7 +303,7 @@ function LigneChambre({
             type="button"
             onClick={() => onOuvrir(r.id)}
             style={{ gridRow: 1, gridColumn: `${col1 + 2} / ${col2 + 2}` }}
-            title={`${r.client_nom} — ${formatSejour(r.date_arrivee, r.date_depart)}`}
+            title={`${r.client_nom} - ${formatSejour(r.date_arrivee, r.date_depart)}`}
             aria-label={`${r.client_nom}, chambre ${r.chambre_numero}, ${formatSejour(r.date_arrivee, r.date_depart)}. ${LIBELLE_STATUT_RESERVATION[r.statut]}. ${resumePaiement(r, devise)}`}
             className={`z-10 m-1 flex min-w-0 flex-col justify-center overflow-hidden border-2 px-2 text-left leading-tight transition-colors ${STYLE_STATUT[r.statut]} ${depuis < 0 ? "rounded-l-none border-l-0" : "rounded-l-lg"} ${jusqua > n ? "rounded-r-none border-r-0" : "rounded-r-lg"}`}
           >

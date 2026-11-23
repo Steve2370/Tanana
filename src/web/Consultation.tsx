@@ -404,7 +404,7 @@ function VueReservations({ toutes, jour, devise }: { toutes: ReservationVue[]; j
                     <Pastille ton={TON_STATUT[r.statut]}>{LIBELLE_STATUT_RESERVATION[r.statut]}</Pastille>
                   </td>
                   <td className="whitespace-nowrap py-3 pr-4 text-right">{formatMontant(r.total_a_payer, devise)}</td>
-                  <td className="py-3 text-right">{r.statut === "annulee" ? "—" : <ResteDu r={r} devise={devise} />}</td>
+                  <td className="py-3 text-right">{r.statut === "annulee" ? "-" : <ResteDu r={r} devise={devise} />}</td>
                 </tr>
               ))}
             </tbody>

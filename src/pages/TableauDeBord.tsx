@@ -103,7 +103,7 @@ function VueAdministrateur({ allerA }: { allerA: (p: IdPage) => void }) {
           icone={integrite && !integrite.intacte ? ShieldAlert : ShieldCheck}
           ton={integrite && !integrite.intacte ? "danger" : "succes"}
         >
-          {integrite ? (integrite.intacte ? "Intact" : "Modifié !") : "—"}
+          {integrite ? (integrite.intacte ? "Intact" : "Modifié !") : "-"}
         </Indicateur>
         {voirConnexions && (
           <Indicateur titre="Personnes connectées" icone={Users} ton="marque">
@@ -202,7 +202,7 @@ export function ListeActions({ entrees, vide }: { entrees: EntreeJournal[]; vide
             {e.sensible && <span className="size-2.5 shrink-0 rounded-full bg-orange" aria-label="à vérifier" />}
             <span>
               <span className="font-semibold">{libelleAction(e.action, e.apres)}</span>
-              <span className="text-gris"> — {e.utilisateur_nom ?? "Tanana"}</span>
+              <span className="text-gris"> - {e.utilisateur_nom ?? "Tanana"}</span>
             </span>
           </span>
           <span className="shrink-0 text-base text-gris">{formatHorodatage(e.date)}</span>

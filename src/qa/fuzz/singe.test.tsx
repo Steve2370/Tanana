@@ -78,7 +78,7 @@ it(`QA · singe de ${ACTIONS} actions sur toute l'application (FUZZ_SEED=${SEED}
       }
       await new Promise((r) => setTimeout(r, 5));
       journal.push(`${i} ${action || "(rien à faire)"}`);
-      const ou = `action ${i} (${action}) — rejouer FUZZ_SEED=${SEED}`;
+      const ou = `action ${i} (${action}) - rejouer FUZZ_SEED=${SEED}`;
       const injecte = injection();
       if (injecte) constats.push(`${injecte} après ${ou}`);
       if (!screen.queryByRole("navigation", { name: "Menu principal" })) {

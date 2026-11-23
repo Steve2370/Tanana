@@ -390,7 +390,7 @@ function FicheCompte({
                         className={`inline-flex size-6 shrink-0 items-center justify-center rounded-full text-sm font-bold ${ok ? "bg-succes-clair text-succes" : "bg-sable text-gris"}`}
                         aria-hidden
                       >
-                        {ok ? "✓" : "–"}
+                        {ok ? "✓" : "-"}
                       </span>
                       <span className={ok ? "" : "text-gris"}>
                         {LIBELLES_PERMISSIONS[p]}

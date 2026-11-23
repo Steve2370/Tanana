@@ -1,4 +1,3 @@
-- Travail à distance : depuis chez vous ou l'étranger, connectez-vous avec votre identifiant et votre mot de passe, puis consultez et modifiez l'hôtel (réservations, caisse, chambres, employés…). L'ordinateur de l'hôtel applique chaque changement et l'inscrit à l'Historique.
-- Préparer l'hôtel sur un autre ordinateur, puis « Retrouver mon hôtel » sur celui de l'hôtel : tout arrive, rien à recopier.
-- Plus de clé secrète à noter : l'adresse du serveur est déjà remplie, et le lien se fait tout seul à la création de l'hôtel.
-- Nouveau client pendant une réservation : champ Email (facultatif). « Courriel » devient « Email » partout.
+- Le curseur se place tout seul dans le premier champ quand un écran ou un formulaire s'ouvre : on tape directement, sans cliquer.
+- Chambres : la colonne « État » ne déborde plus sur les formulaires ; sur un écran moyen, les formulaires passent sous la liste.
+- Tirets courts (-) partout dans l'application et sur les reçus et factures, à la place des tirets longs.

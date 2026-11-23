@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BedDouble,
   CalendarDays,
@@ -16,6 +16,7 @@ import {
 import type { Permission } from "../bindings/Permission";
 import { LogoSymbole } from "../components/Logo";
 import { BandeauMiseAJour } from "../components/miseAJour";
+import { curseurPourEcran } from "../lib/curseur";
 import { FournisseurLogo, urlLogo, useLogoHotel } from "../lib/logoHotel";
 import { useLectureSeule, useSession } from "../lib/session";
 import { BandeauConsultation } from "./distance/ConsultationDistante";
@@ -76,6 +77,11 @@ export function Coquille({ nomHotel, distant }: { nomHotel: string; distant?: Di
   const actualiser = useCallback(() => setDonnees((n) => n + 1), []);
   const visibles = MENU.filter((m) => m.permissions === null || m.permissions.some(peut));
   const courante = visibles.some((m) => m.id === page) || (page === "compte" && !lectureSeule) ? page : "accueil";
+  // Chaque écran qui s'ouvre met le curseur dans son premier champ visible.
+  const ecran = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ecran.current) curseurPourEcran(ecran.current);
+  }, [courante, donnees]);
 
   const contenu: Record<IdPage, ReactNode> = {
     accueil: <TableauDeBord allerA={setPage} />,
@@ -171,7 +177,7 @@ export function Coquille({ nomHotel, distant }: { nomHotel: string; distant?: Di
               <BandeauConsultation onActualiser={actualiser} modifications={distant.modifications} onLien={distant.onLien} />
             </div>
           )}
-          <div key={`${courante}-${donnees}`} className="apparition mx-auto max-w-6xl">
+          <div ref={ecran} key={`${courante}-${donnees}`} className="apparition mx-auto max-w-6xl">
             {contenu[courante]}
           </div>
         </main>

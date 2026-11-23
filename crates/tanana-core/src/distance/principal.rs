@@ -159,7 +159,7 @@ impl Tanana {
         Ok(())
     }
 
-    /// 1/2 — Activation automatique en attente ? (adresse du relais, demande à envoyer).
+    /// 1/2 - Activation automatique en attente ? (adresse du relais, demande à envoyer).
     pub fn preparer_activation_auto(&mut self) -> Resultat<Option<(String, ActivationPreparee)>> {
         let conn = self.conn_brute();
         let deja: i64 = conn.query_row("SELECT count(*) FROM sync_config", [], |r| r.get(0))?;
@@ -176,7 +176,7 @@ impl Tanana {
         Ok(Some((relais, super::preparer_demande(code.as_deref())?)))
     }
 
-    /// 2/2 — Le relais a inscrit l'hôtel : on enregistre la liaison (action du système).
+    /// 2/2 - Le relais a inscrit l'hôtel : on enregistre la liaison (action du système).
     pub fn terminer_activation_auto(
         &mut self,
         adresse_relais: &str,
@@ -262,7 +262,7 @@ pub struct HotelRetrouve {
     pub instantane_du: String,
 }
 
-/// 1/2 — Vérifie l'identifiant et le mot de passe, et qu'une copie complète existe.
+/// 1/2 - Vérifie l'identifiant et le mot de passe, et qu'une copie complète existe.
 /// Rien ne change encore, ni ici ni sur le relais.
 pub fn trouver_hotel(relais: &dyn Relais, identifiant: &str, mot_de_passe: &str) -> Resultat<HotelRetrouve> {
     let (hotel_id, secret) = ouvrir_acces_distant(relais, identifiant, mot_de_passe)?;
@@ -276,7 +276,7 @@ pub struct HotelRepris {
     pub cle: Option<CleBase>,
 }
 
-/// 2/2 — Fait de cet ordinateur l'ordinateur principal et y installe la base.
+/// 2/2 - Fait de cet ordinateur l'ordinateur principal et y installe la base.
 /// `chemin` : emplacement final de la base (ne doit pas exister).
 /// En cas d'échec, rien n'est écrit à `chemin` ; on peut recommencer.
 pub fn reprendre_hotel(

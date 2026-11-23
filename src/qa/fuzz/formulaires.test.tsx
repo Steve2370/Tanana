@@ -113,21 +113,21 @@ describe(`QA · fuzzing des formulaires (FUZZ_SEED=${SEED})`, () => {
             const faites = faux.ecritures.slice(avant);
             const lieu = `${ecran}, tour ${tour}, ${valeurs.join(" ")}`;
             if (attente && new Set(faites).size < faites.length) {
-              constats.push(`double envoi (${faites.join(", ")}) — ${lieu}`);
+              constats.push(`double envoi (${faites.join(", ")}) - ${lieu}`);
             }
             if (faites.length === 0 && !refusVisible(form)) {
-              constats.push(`refus silencieux : rien envoyé, aucun message — ${lieu}`);
+              constats.push(`refus silencieux : rien envoyé, aucun message - ${lieu}`);
             }
           }
           const injecte = injection();
-          if (injecte) constats.push(`${injecte} — ${ecran}, tour ${tour}`);
+          if (injecte) constats.push(`${injecte} - ${ecran}, tour ${tour}`);
           await userEvent.keyboard("{Escape}");
           await pause();
         } finally {
           veille.arreter();
           cleanup();
         }
-        for (const e of veille.erreurs) constats.push(`${e} — ${ecran}, tour ${tour}`);
+        for (const e of veille.erreurs) constats.push(`${e} - ${ecran}, tour ${tour}`);
         if (faux.inconnues.size) constats.push(`commandes non simulées : ${[...faux.inconnues].join(", ")}`);
       }
       expect(constats, `FUZZ_SEED=${SEED}`).toEqual([]);

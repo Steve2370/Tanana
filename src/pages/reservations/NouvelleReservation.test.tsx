@@ -56,7 +56,7 @@ describe("Nouvelle réservation", () => {
 
     // 4. Prix calculé tout seul
     expect(screen.getByText(/2 nuits × 25\s000\sFCFA =/)).toHaveTextContent("50 000 FCFA");
-    expect(screen.getByText(/Mbarga Aline — chambre 101 —/)).toHaveTextContent(`du ${formatJourMoyen(J)} au ${formatJourLong(j(2))} (2 nuits)`);
+    expect(screen.getByText(/Mbarga Aline - chambre 101 -/)).toHaveTextContent(`du ${formatJourMoyen(J)} au ${formatJourLong(j(2))} (2 nuits)`);
 
     await userEvent.click(screen.getByRole("button", { name: "Enregistrer la réservation" }));
     await waitFor(() =>

@@ -248,7 +248,7 @@ fn facture_sans_paiement_et_prix_non_divisible() {
     let f = h.t.imprimer_facture(&h.admin, &r.id, DOUALA).unwrap();
     let texte = tout(&f);
     assert!(texte.contains("Aucun paiement reçu pour le moment."));
-    assert!(texte.contains("—"), "70 000 sur 3 nuits : pas de prix par nuit inventé");
+    assert!(texte.contains("-"), "70 000 sur 3 nuits : pas de prix par nuit inventé");
     assert!(texte.contains("Soixante-dix mille francs CFA"));
 }
 

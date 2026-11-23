@@ -962,7 +962,7 @@ function FormulaireModification({
   // La chambre actuelle reste proposée : c'est cette réservation qui l'occupe.
   const options = [
     { valeur: r.chambre_id, libelle: `Chambre ${r.chambre_numero} (actuelle)` },
-    ...libres.filter((c) => c.id !== r.chambre_id).map((c) => ({ valeur: c.id, libelle: `Chambre ${c.numero} — ${c.type_nom}` })),
+    ...libres.filter((c) => c.id !== r.chambre_id).map((c) => ({ valeur: c.id, libelle: `Chambre ${c.numero} - ${c.type_nom}` })),
   ];
 
   /** Quand la durée ou la chambre change, on propose le prix normal ; il reste modifiable. */

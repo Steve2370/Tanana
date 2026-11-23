@@ -146,7 +146,7 @@ const MOTS: Record<string, string> = {
   false: "non",
 };
 const valeur = (v: unknown): string => {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   if (Array.isArray(v) && v.every((x) => typeof x !== "object")) return v.map(valeur).join(", ");
   if (typeof v === "object") return JSON.stringify(v);
   const texte = String(v);

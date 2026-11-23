@@ -288,7 +288,7 @@ fn vers_sql(v: &Value) -> Sql {
 // ───────────────────────────── À l'hôtel ─────────────────────────────
 
 impl Tanana {
-    /// 1/2 — Vérifie le droit, prépare la clé secrète et la demande d'inscription.
+    /// 1/2 - Vérifie le droit, prépare la clé secrète et la demande d'inscription.
     pub fn preparer_activation_distance(
         &mut self,
         token: &str,
@@ -303,7 +303,7 @@ impl Tanana {
         preparer_demande(code_invitation)
     }
 
-    /// 2/2 — Enregistre la liaison, installe la capture et met tout l'hôtel en boîte d'envoi.
+    /// 2/2 - Enregistre la liaison, installe la capture et met tout l'hôtel en boîte d'envoi.
     pub fn terminer_activation_distance(
         &mut self,
         token: &str,
@@ -840,7 +840,7 @@ impl Tanana {
         Ok(())
     }
 
-    /// 1/2 — Ce qu'il faut demander au relais.
+    /// 1/2 - Ce qu'il faut demander au relais.
     pub fn preparer_lecture_copie(&self) -> Resultat<LecturePreparee> {
         self.exiger_copie()?;
         let (relais, hotel_id, secret, apres) = self.conn.query_row(
@@ -851,7 +851,7 @@ impl Tanana {
         Ok(LecturePreparee { relais, hotel_id, jeton_lecture: Secret::lire(&secret)?.jeton_lecture(), apres })
     }
 
-    /// 2/2 — Déchiffre et applique une page de lots, dans l'ordre. Tout ou rien :
+    /// 2/2 - Déchiffre et applique une page de lots, dans l'ordre. Tout ou rien :
     /// un lot illisible annule la page entière, la copie reste cohérente.
     pub fn appliquer_page_copie(&mut self, page: &PageLots) -> Resultat<usize> {
         self.exiger_copie()?;

@@ -93,9 +93,9 @@ def main():
                     continue
                 rc, _ = vitest(copie, [prouver])
                 open(os.path.join(copie, fichier), "w", encoding="utf-8").write(original)
-                print(id_, "tué par le test" if rc else "TOUJOURS SURVIVANT", "—", bug)
+                print(id_, "tué par le test" if rc else "TOUJOURS SURVIVANT", "-", bug)
             return
-        lignes = [f"# Mutants d'écran — {nom}", "", "| Mutant | Fichier | Bug simulé | Résultat |", "|---|---|---|---|"]
+        lignes = [f"# Mutants d'écran - {nom}", "", "| Mutant | Fichier | Bug simulé | Résultat |", "|---|---|---|---|"]
         tues = 0
         for id_, fichier, avant, apres, tests, bug in mutants:
             original = appliquer(copie, fichier, avant, apres)
@@ -109,10 +109,10 @@ def main():
                 tues += rc != 0
                 journal.write(f"\n===== {nom} {id_} ({resultat}, {time.time() - t0:.0f} s) : {bug}\n{resume}\n")
             lignes.append(f"| {id_} | `{fichier}` | {bug} | {resultat} |")
-            print(id_, resultat, "—", bug, flush=True)
+            print(id_, resultat, "-", bug, flush=True)
         lignes += ["", f"**{tues}/{len(mutants)} tués**"]
         open(os.path.join(RACINE, ".qa", f"{nom}.md"), "w", encoding="utf-8").write("\n".join(lignes) + "\n")
-        print(f"\n{tues}/{len(mutants)} tués — détail : .qa/{nom}.md")
+        print(f"\n{tues}/{len(mutants)} tués - détail : .qa/{nom}.md")
     finally:
         shutil.rmtree(copie, ignore_errors=True)
 
